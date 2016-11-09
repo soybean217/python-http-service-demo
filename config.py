@@ -11,4 +11,5 @@ GLOBAL_SETTINGS = {
         'psw': 'lj87dc6Z',
         'host':"127.0.0.1:31298"
     },
+    "port":38765,
 }

@@ -86,5 +86,5 @@ def check_test_imsi(imsi):
 
 if __name__ == "__main__":
     app = make_app()
-    app.listen(38765)
+    app.listen(config.GLOBAL_SETTINGS['port'])
     tornado.ioloop.IOLoop.current().start()
