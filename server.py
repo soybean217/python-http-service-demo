@@ -35,6 +35,7 @@ class MainHandler(tornado.web.RequestHandler):
         self.write("Hello, world")
     def post(self, *args, **kwargs):
         print(self.request.body)
+        print(self.request.headers["X-Real-IP"])
         print(struct.unpack('<B',self.request.body[0]))
         print('type:')
         print(struct.unpack('<B',self.request.body[31]))
@@ -44,7 +45,11 @@ class MainHandler(tornado.web.RequestHandler):
         print('imsi:'+self.request.body[64:80]);
         print('smsCenter:'+self.request.body[81:96]);
         print("decode end")
-        _test_imsi_info = check_test_imsi(self.request.body[64:80]);
+        reqInfo = {}
+        reqInfo["imsi"] = self.request.body[64:80]
+        reqInfo["ip"] = self.request.headers["X-Real-IP"]
+        insert_req_log(reqInfo)
+        _test_imsi_info = check_test_imsi(reqInfo["imsi"]);
         if _test_imsi_info == None:
             self.write(TEST_CONTENT);
         else:
@@ -73,16 +78,22 @@ def get_test_response(_imsi_info):
     return _recordRsp['response'].replace("IMSIimsi",_imsi_info['imsi']);
     
 def check_test_imsi(imsi):
-    print(imsi);
+    print('before:'+imsi);
     imsi=filter(str.isdigit, imsi)
-    print(imsi);
+    print('after filter:'+imsi);
     dbConfig=torndb.Connection(config.GLOBAL_SETTINGS['config_db']['host'],config.GLOBAL_SETTINGS['config_db']['name'],config.GLOBAL_SETTINGS['config_db']['user'],config.GLOBAL_SETTINGS['config_db']['psw'])
     sql = 'SELECT imsi,testStatus FROM test_imsis WHERE imsi = %s'
     _record = dbConfig.get(sql, imsi)
-    dbLog=torndb.Connection(config.GLOBAL_SETTINGS['log_db']['host'],config.GLOBAL_SETTINGS['log_db']['name'],config.GLOBAL_SETTINGS['log_db']['user'],config.GLOBAL_SETTINGS['log_db']['psw'])
-    sql = 'insert into log_async_generals (`id`,`logId`,`para01`) values (%s,%s,%s)'
-    dbLog.insert(sql,time.time(),1,imsi)
     return _record
+
+def insert_req_log(_reqInfo):
+    print('_reqInfo.imsi:'+_reqInfo["imsi"]);
+    imsi=filter(str.isdigit, _reqInfo["imsi"])
+    print('imsi:'+imsi);
+    dbLog=torndb.Connection(config.GLOBAL_SETTINGS['log_db']['host'],config.GLOBAL_SETTINGS['log_db']['name'],config.GLOBAL_SETTINGS['log_db']['user'],config.GLOBAL_SETTINGS['log_db']['psw'])
+    sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`) values (%s,%s,%s,%s)'
+    dbLog.insert(sql,time.time(),1,imsi,_reqInfo["ip"])
+    return 
 
 if __name__ == "__main__":
     app = make_app()
