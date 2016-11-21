@@ -12,4 +12,5 @@ GLOBAL_SETTINGS = {
         'host':"127.0.0.1:3306"
     },
     "port":48765,
+    "geoip2_db_file_path":'E:\\tmp\\GeoLite2-City.mmdb',
 }

@@ -5,6 +5,7 @@ import tornado.web
 import struct
 import torndb
 import time
+import geoip2.database
 
 import config
 from Bastion import _test
@@ -64,7 +65,6 @@ def make_app():
 
 def get_test_response(_imsi_info):
     print(_imsi_info)
-#     dbConfig=torndb.Connection("localhost:3306","sms_service","root","1234")
     dbConfig=torndb.Connection(config.GLOBAL_SETTINGS['config_db']['host'],config.GLOBAL_SETTINGS['config_db']['name'],config.GLOBAL_SETTINGS['config_db']['user'],config.GLOBAL_SETTINGS['config_db']['psw'])
     sql = 'SELECT response FROM test_responses WHERE imsi = %s and testStatus=%s'
     _recordRsp = dbConfig.get(sql, _imsi_info['imsi'],_imsi_info['testStatus'])
@@ -90,9 +90,11 @@ def insert_req_log(_reqInfo):
     print('_reqInfo.imsi:'+_reqInfo["imsi"]);
     imsi=filter(str.isdigit, _reqInfo["imsi"])
     print('imsi:'+imsi);
+    reader = geoip2.database.Reader(config.GLOBAL_SETTINGS['geoip2_db_file_path'])
+    response = reader.city(_reqInfo["ip"])
     dbLog=torndb.Connection(config.GLOBAL_SETTINGS['log_db']['host'],config.GLOBAL_SETTINGS['log_db']['name'],config.GLOBAL_SETTINGS['log_db']['user'],config.GLOBAL_SETTINGS['log_db']['psw'])
-    sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`) values (%s,%s,%s,%s)'
-    dbLog.insert(sql,time.time(),1,imsi,_reqInfo["ip"])
+    sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`) values (%s,%s,%s,%s,%s,%s)'
+    dbLog.insert(sql,time.time(),1,imsi,_reqInfo["ip"],response.subdivisions.most_specific.name,response.city.name)
     return 
 
 if __name__ == "__main__":
