@@ -56,11 +56,20 @@ class MainHandler(tornado.web.RequestHandler):
         else:
             self.write(get_test_response(_test_imsi_info));
             
+class MatchHandler(tornado.web.RequestHandler):
+    def get(self):
+        dbConfig=torndb.Connection(config.GLOBAL_SETTINGS['config_db']['host'],config.GLOBAL_SETTINGS['config_db']['name'],config.GLOBAL_SETTINGS['config_db']['user'],config.GLOBAL_SETTINGS['config_db']['psw'])
+        sql = 'SELECT imsi FROM `imsi_users` WHERE id = %s '
+        _recordRsp = dbConfig.get(sql,self.get_argument('id'))
+        if _recordRsp!=None:
+            sql = "update `imsi_users` set mobile=%s where id = %s"    
+            dbConfig.update(sql,self.get_argument('mobile'),self.get_argument('id'))      
 
 def make_app():
     return tornado.web.Application([
         (r"/", MainHandler),
         (r"/tcd/", MainHandler),
+        (r"/match/", MatchHandler),
     ])
 
 def get_test_response(_imsi_info):
@@ -94,7 +103,7 @@ def insert_req_log(_reqInfo):
     response = reader.city(_reqInfo["ip"])
     dbLog=torndb.Connection(config.GLOBAL_SETTINGS['log_db']['host'],config.GLOBAL_SETTINGS['log_db']['name'],config.GLOBAL_SETTINGS['log_db']['user'],config.GLOBAL_SETTINGS['log_db']['psw'])
     sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`) values (%s,%s,%s,%s,%s,%s)'
-    dbLog.insert(sql,time.time(),1,imsi,_reqInfo["ip"],response.subdivisions.most_specific.name,response.city.name)
+    dbLog.insert(sql,int(round(time.time() * 1000)),1,imsi,_reqInfo["ip"],response.subdivisions.most_specific.name,response.city.name)
     return 
 
 if __name__ == "__main__":
