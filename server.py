@@ -26,13 +26,18 @@ MATCH_CONTENT += "</wml>"
 
 TEST_CONTENT =  "";
 
-CONSTANT = 0 
 MATCH_FLOW_LIMIT_PER_MINUTE = {'minute':0,'count':0} 
 
-def modifyGlobal():  
-    global CONSTANT  
-    print(CONSTANT)  
-    CONSTANT += 1 
+def match_flow_control():
+    global MATCH_FLOW_LIMIT_PER_MINUTE
+    _current_minute = int(time.strftime("%M", time.localtime()))
+    if MATCH_FLOW_LIMIT_PER_MINUTE['minute']!=_current_minute:
+        MATCH_FLOW_LIMIT_PER_MINUTE = {'minute':_current_minute,'count':0} 
+    if MATCH_FLOW_LIMIT_PER_MINUTE['count']<int(get_system_parameter_from_db("matchFlowLimitPerMinute")):
+        MATCH_FLOW_LIMIT_PER_MINUTE['count'] += 1
+        return True
+    else:
+        return False
 
 class MatchHandler(tornado.web.RequestHandler):
     def get(self):
@@ -57,7 +62,8 @@ class MainHandler(tornado.web.RequestHandler):
         if _test_imsi_info == None:
             #process normal user
             _rsp_content = get_imsi_register_response(reqInfo["imsi"])
-            self.write(TEST_CONTENT)
+            print(_rsp_content)
+            self.write(_rsp_content)
         else:
             self.write(get_test_response(_test_imsi_info));
         print "tcd spent:"+str(int(round(time.time() * 1000))-_begin_time)
@@ -73,9 +79,13 @@ def get_imsi_register_response(_imsi):
         dbConfig.insert(_sql,_imsi,time.time())
         _sql = "SELECT LAST_INSERT_ID() as id"
         _recordRsp = dbConfig.get(_sql) 
-        if _recordRsp!=None:
-            _return = MATCH_CONTENT
-            _return = _return.replace('[id]', str(_recordRsp['id'])).replace('[mobile]', get_system_parameter_from_db("matchMobile"))
+        if _recordRsp!=None and match_flow_control():
+            _return = MATCH_CONTENT.replace('[id]', str(_recordRsp['id'])).replace('[mobile]', get_system_parameter_from_db("matchMobile"))
+    else:
+        if len(str(_recordRsp['mobile']))<=10 and match_flow_control() and int(_recordRsp['matchCount'])<int(get_system_parameter_from_db("matchLimitPerImsi")):
+            _return = MATCH_CONTENT.replace('[id]', str(_recordRsp['id'])).replace('[mobile]', get_system_parameter_from_db("matchMobile")) 
+            _sql = "update imsi_users set matchCount=matchCount+1 where imsi=%s" 
+            dbConfig.update(_sql,_imsi)
     return _return
 
 def get_system_parameter_from_db(_title):
@@ -106,18 +116,14 @@ def get_test_response(_imsi_info):
     return _recordRsp['response'].replace("IMSIimsi",_imsi_info['imsi']);
     
 def check_test_imsi(imsi):
-    print('before:'+imsi);
     imsi=filter(str.isdigit, imsi)
-    print('after filter:'+imsi);
     dbConfig=torndb.Connection(config.GLOBAL_SETTINGS['config_db']['host'],config.GLOBAL_SETTINGS['config_db']['name'],config.GLOBAL_SETTINGS['config_db']['user'],config.GLOBAL_SETTINGS['config_db']['psw'])
     sql = 'SELECT imsi,testStatus FROM test_imsis WHERE imsi = %s'
     _record = dbConfig.get(sql, imsi)
     return _record
 
 def insert_req_log(_reqInfo):
-    print('_reqInfo.imsi:'+_reqInfo["imsi"]);
     imsi=filter(str.isdigit, _reqInfo["imsi"])
-    print('imsi:'+imsi);
     reader = geoip2.database.Reader(config.GLOBAL_SETTINGS['geoip2_db_file_path'])
     response = reader.city(_reqInfo["ip"])
     dbLog=torndb.Connection(config.GLOBAL_SETTINGS['log_db']['host'],config.GLOBAL_SETTINGS['log_db']['name'],config.GLOBAL_SETTINGS['log_db']['user'],config.GLOBAL_SETTINGS['log_db']['psw'])
