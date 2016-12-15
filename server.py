@@ -51,7 +51,6 @@ class MatchHandler(tornado.web.RequestHandler):
 class MainHandler(tornado.web.RequestHandler):
     def get(self):
         self.write("Hello, world")
-        modifyGlobal()  
     def post(self, *args, **kwargs):
         _begin_time = int(round(time.time() * 1000))
         reqInfo = {}
