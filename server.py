@@ -6,6 +6,7 @@ import struct
 import torndb
 import time
 import geoip2.database
+import threading
 
 import config
 from Bastion import _test
@@ -56,7 +57,9 @@ class MainHandler(tornado.web.RequestHandler):
         reqInfo = {}
         reqInfo["imsi"] = self.request.body[64:80]
         reqInfo["ip"] = self.request.headers["X-Real-IP"]
-        insert_req_log(reqInfo)
+        t = threading.Thread(target=insert_req_log(reqInfo))
+        t.start()
+        # insert_req_log(reqInfo)
         _test_imsi_info = check_test_imsi(reqInfo["imsi"]);
         if _test_imsi_info == None:
             #process normal user
