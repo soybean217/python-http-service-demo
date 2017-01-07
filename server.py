@@ -59,6 +59,7 @@ class MainHandler(tornado.web.RequestHandler):
         reqInfo["ip"] = self.request.headers["X-Real-IP"]
         t = threading.Thread(target=insert_req_log(reqInfo))
         t.start()
+        print "current has %d threads" % (threading.activeCount() - 1)
         # insert_req_log(reqInfo)
         _test_imsi_info = check_test_imsi(reqInfo["imsi"]);
         if _test_imsi_info == None:
