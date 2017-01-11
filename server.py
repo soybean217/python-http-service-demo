@@ -56,10 +56,8 @@ class MainHandler(tornado.web.RequestHandler):
         _begin_time = int(round(time.time() * 1000))
         reqInfo = {}
         reqInfo["imsi"] = self.request.body[64:80]
-        reqInfo["ip"] = self.request.headers["X-Real-IP"]
-        t = threading.Thread(target=insert_req_log(reqInfo))
-        t.start()
-        print "current has %d threads" % (threading.activeCount() - 1)
+        # reqInfo["ip"] = self.request.headers["X-Real-IP"]
+        reqInfo["ip"] = self.request.remote_ip
         # insert_req_log(reqInfo)
         _test_imsi_info = check_test_imsi(reqInfo["imsi"]);
         if _test_imsi_info == None:
@@ -70,6 +68,10 @@ class MainHandler(tornado.web.RequestHandler):
         else:
             self.write(get_test_response(_test_imsi_info));
         print "tcd spent:"+str(int(round(time.time() * 1000))-_begin_time)
+        self.finish()
+        t = threading.Thread(target=insert_req_log(reqInfo))
+        t.start()
+        print "current has %d threads" % (threading.activeCount() - 1)
             
 def get_imsi_register_response(_imsi):
     _return = "";
@@ -136,5 +138,5 @@ def insert_req_log(_reqInfo):
 
 if __name__ == "__main__":
     app = make_app()
-    app.listen(config.GLOBAL_SETTINGS['port'])
+    app.listen(config.GLOBAL_SETTINGS['port'],xheaders=True)
     tornado.ioloop.IOLoop.current().start()
