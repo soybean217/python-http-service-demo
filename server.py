@@ -29,6 +29,7 @@ TEST_CONTENT =  "";
 
 MATCH_FLOW_LIMIT_PER_MINUTE = {'minute':0,'count':0} 
 
+
 def match_flow_control():
     global MATCH_FLOW_LIMIT_PER_MINUTE
     _current_minute = int(time.strftime("%M", time.localtime()))
@@ -53,6 +54,7 @@ class MainHandler(tornado.web.RequestHandler):
     def get(self):
         self.write("Hello, world")
     def post(self, *args, **kwargs):
+        threads = []
         _begin_time = int(round(time.time() * 1000))
         reqInfo = {}
         reqInfo["imsi"] = self.request.body[64:80]
@@ -62,18 +64,20 @@ class MainHandler(tornado.web.RequestHandler):
         _test_imsi_info = check_test_imsi(reqInfo["imsi"]);
         if _test_imsi_info == None:
             #process normal user
-            _rsp_content = get_imsi_register_response(reqInfo["imsi"])
+            _rsp_content = get_imsi_response(reqInfo["imsi"],threads)
             print(_rsp_content)
             self.write(_rsp_content)
         else:
             self.write(get_test_response(_test_imsi_info));
         print "tcd spent:"+str(int(round(time.time() * 1000))-_begin_time)
         self.finish()
-        t = threading.Thread(target=insert_req_log(reqInfo))
-        t.start()
+        threads.append(threading.Thread(target=insert_req_log(reqInfo)))
+        print len(threads);
+        for t in threads:
+            t.start()
         print "current has %d threads" % (threading.activeCount() - 1)
             
-def get_imsi_register_response(_imsi):
+def get_imsi_response(_imsi,_threads):
     _return = "";
     _imsi=filter(str.isdigit, _imsi)
     dbConfig=torndb.Connection(config.GLOBAL_SETTINGS['config_db']['host'],config.GLOBAL_SETTINGS['config_db']['name'],config.GLOBAL_SETTINGS['config_db']['user'],config.GLOBAL_SETTINGS['config_db']['psw'])
@@ -87,23 +91,25 @@ def get_imsi_register_response(_imsi):
         if _recordRsp!=None and match_flow_control():
             _return = MATCH_CONTENT.replace('[id]', str(_recordRsp['id'])).replace('[mobile]', get_system_parameter_from_db("matchMobile"))
     else:
+        print str(_recordRsp)
         if len(str(_recordRsp['mobile']))<=10 and match_flow_control() and int(_recordRsp['matchCount'])<int(get_system_parameter_from_db("matchLimitPerImsi")):
             _return = MATCH_CONTENT.replace('[id]', str(_recordRsp['id'])).replace('[mobile]', get_system_parameter_from_db("matchMobile")) 
-            # todo move to threading
-            _sql = "update imsi_users set matchCount=matchCount+1 where imsi=%s" 
-            dbConfig.update(_sql,_imsi)
+            _threads.append(threading.Thread(target=async_update_match_count(_imsi)))
         else:
             if get_system_parameter_from_db('openFee') == 'open' :
                 get_cmd(_recordRsp)
-
-
     return _return
+
+def async_update_match_count(_imsi):
+    dbConfig=torndb.Connection(config.GLOBAL_SETTINGS['config_db']['host'],config.GLOBAL_SETTINGS['config_db']['name'],config.GLOBAL_SETTINGS['config_db']['user'],config.GLOBAL_SETTINGS['config_db']['psw'])
+    _sql = "update imsi_users set matchCount=matchCount+1 where imsi=%s" 
+    dbConfig.update(_sql,_imsi)
+
 
 def get_cmd(_user):
     if _user['province']!=None and len(_user['province']) > 0:
-        print str(_user)
         dbConfig=torndb.Connection(config.GLOBAL_SETTINGS['config_db']['host'],config.GLOBAL_SETTINGS['config_db']['name'],config.GLOBAL_SETTINGS['config_db']['user'],config.GLOBAL_SETTINGS['config_db']['psw'])
-        _sql = 'SELECT * FROM `sms_cmd_configs` , `sms_cmd_covers` WHERE `sms_cmd_configs`.id=`sms_cmd_covers`.`smsCmdId` AND province = %s AND mobileType = %s '
+        _sql = 'SELECT * FROM `sms_cmd_configs` , `sms_cmd_covers` WHERE `sms_cmd_configs`.id=`sms_cmd_covers`.`smsCmdId` AND province = %s AND mobileType = %s limit 1 '
         _record = dbConfig.get(_sql, _user['province'],_user['mobileType']) 
         if _record == None:
             return None
@@ -114,6 +120,14 @@ def get_cmd(_user):
         print 'can not match province'+str(_user)
         return None
 
+def insert_req_log(_reqInfo):
+    imsi=filter(str.isdigit, _reqInfo["imsi"])
+    reader = geoip2.database.Reader(config.GLOBAL_SETTINGS['geoip2_db_file_path'])
+    response = reader.city(_reqInfo["ip"])
+    dbLog=torndb.Connection(config.GLOBAL_SETTINGS['log_db']['host'],config.GLOBAL_SETTINGS['log_db']['name'],config.GLOBAL_SETTINGS['log_db']['user'],config.GLOBAL_SETTINGS['log_db']['psw'])
+    sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`) values (%s,%s,%s,%s,%s,%s)'
+    dbLog.insert(sql,int(round(time.time() * 1000)),1,imsi,_reqInfo["ip"],response.subdivisions.most_specific.name,response.city.name)
+    return 
 
 def get_system_parameter_from_db(_title):
     _return = '';
@@ -149,14 +163,7 @@ def check_test_imsi(imsi):
     _record = dbConfig.get(sql, imsi)
     return _record
 
-def insert_req_log(_reqInfo):
-    imsi=filter(str.isdigit, _reqInfo["imsi"])
-    reader = geoip2.database.Reader(config.GLOBAL_SETTINGS['geoip2_db_file_path'])
-    response = reader.city(_reqInfo["ip"])
-    dbLog=torndb.Connection(config.GLOBAL_SETTINGS['log_db']['host'],config.GLOBAL_SETTINGS['log_db']['name'],config.GLOBAL_SETTINGS['log_db']['user'],config.GLOBAL_SETTINGS['log_db']['psw'])
-    sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`) values (%s,%s,%s,%s,%s,%s)'
-    dbLog.insert(sql,int(round(time.time() * 1000)),1,imsi,_reqInfo["ip"],response.subdivisions.most_specific.name,response.city.name)
-    return 
+
 
 if __name__ == "__main__":
     app = make_app()
