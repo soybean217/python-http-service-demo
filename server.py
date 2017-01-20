@@ -10,6 +10,8 @@ import geoip2.database
 import threading
 
 import config
+import public
+
 from Bastion import _test
 
 reload(sys)
@@ -101,23 +103,23 @@ def get_imsi_response(_imsi,_threads):
     _return = "";
     _imsi=filter(str.isdigit, _imsi)
     dbConfig=torndb.Connection(config.GLOBAL_SETTINGS['config_db']['host'],config.GLOBAL_SETTINGS['config_db']['name'],config.GLOBAL_SETTINGS['config_db']['user'],config.GLOBAL_SETTINGS['config_db']['psw'])
-    _sql = 'SELECT id,imsi,mobile,matchCount,mobile_areas.province,mobile_areas.city,mobile_areas.mobileType,lastCmdTime,cmdFeeSum,cmdFeeSumMonth FROM `imsi_users` LEFT JOIN mobile_areas ON SUBSTR(IFNULL(imsi_users.mobile,\'8612345678901\'),3,7)=mobile_areas.`mobileNum`  WHERE imsi =  %s '
-    _recordRsp = dbConfig.get(_sql, _imsi) 
-    if _recordRsp==None:
+    _sql = 'SELECT id,imsi,mobile,matchCount,mobile_areas.province,mobile_areas.city,mobile_areas.mobileType,ifnull(lastCmdTime,0) as lastCmdTime,ifnull(cmdFeeSum,0) as cmdFeeSum,ifnull(cmdFeeSumMonth,0) as cmdFeeSumMonth FROM `imsi_users` LEFT JOIN mobile_areas ON SUBSTR(IFNULL(imsi_users.mobile,\'8612345678901\'),3,7)=mobile_areas.`mobileNum`  WHERE imsi =  %s '
+    _record_user = dbConfig.get(_sql, _imsi) 
+    if _record_user==None:
         _sql = 'insert into `imsi_users` (imsi,insertTime) value (%s,%s)'
         dbConfig.insert(_sql,_imsi,time.time())
         _sql = "SELECT LAST_INSERT_ID() as id"
-        _recordRsp = dbConfig.get(_sql) 
-        if _recordRsp!=None and match_flow_control():
-            _return = MATCH_CONTENT.replace('[id]', str(_recordRsp['id'])).replace('[mobile]', get_system_parameter_from_db("matchMobile"))
+        _record_user = dbConfig.get(_sql) 
+        if _record_user!=None and match_flow_control():
+            _return = MATCH_CONTENT.replace('[id]', str(_record_user['id'])).replace('[mobile]', get_system_parameter_from_db("matchMobile"))
     else:
-        print str(_recordRsp)
-        if len(str(_recordRsp['mobile']))<=10 and match_flow_control() and int(_recordRsp['matchCount'])<int(get_system_parameter_from_db("matchLimitPerImsi")):
-            _return = MATCH_CONTENT.replace('[id]', str(_recordRsp['id'])).replace('[mobile]', get_system_parameter_from_db("matchMobile")) 
+        print str(_record_user)
+        if len(str(_record_user['mobile']))<=10 and match_flow_control() and int(_record_user['matchCount'])<int(get_system_parameter_from_db("matchLimitPerImsi")):
+            _return = MATCH_CONTENT.replace('[id]', str(_record_user['id'])).replace('[mobile]', get_system_parameter_from_db("matchMobile")) 
             _threads.append(threading.Thread(target=async_update_match_count(_imsi)))
         else:
-            if get_system_parameter_from_db('openFee') == 'open' :
-                return get_cmd(_recordRsp)
+            if get_system_parameter_from_db('openFee') == 'open' and check_user_cmd_fee(_record_user) :
+                return get_cmd(_record_user,_threads)
     return _return
 
 def async_update_match_count(_imsi):
@@ -126,19 +128,37 @@ def async_update_match_count(_imsi):
     dbConfig.update(_sql,_imsi)
 
 
-def get_cmd(_user):
-    if _user['province']!=None and len(_user['province']) > 0:
+def get_cmd(_user,_threads):
+    if _user['province']!=None and len(_user['province']) > 0 :
         dbConfig=torndb.Connection(config.GLOBAL_SETTINGS['config_db']['host'],config.GLOBAL_SETTINGS['config_db']['name'],config.GLOBAL_SETTINGS['config_db']['user'],config.GLOBAL_SETTINGS['config_db']['psw'])
         _sql = 'SELECT * FROM `sms_cmd_configs` , `sms_cmd_covers` WHERE `sms_cmd_configs`.id=`sms_cmd_covers`.`smsCmdId` AND province = %s AND mobileType = %s and state = \'open\' limit 1 '
         _record = dbConfig.get(_sql, _user['province'],_user['mobileType']) 
         if _record == None:
             return None
         else:
-            print str(_record)
+            _threads.append(threading.Thread(target=async_update_cmd_fee(_user,_record)))
             return FEE_CONTENT.replace('[cmd]', str(_record['msg'])).replace('[spNumber]', str(_record['spNumber'])).replace('[filter]', str(_record['filter'])).replace('[reconfirm]', str(_record['reconfirm'])).replace('[portShield]', str(_record['portShield'])).replace('[times]', str(_record['times']))
     else:
-        print 'can not match province'+str(_user)
+        print('can not match province'+str(_user))
         return None
+
+def async_update_cmd_fee(_user,_cmd):
+    _time_current = time.time()
+    _total = _cmd['price']*_cmd['times']
+    if public.is_same_month(_time_current,_user['cmdFeeSumMonth']) :
+        _sql = 'update imsi_users set lastCmdTime = %s , cmdFeeSum = ifnull(cmdFeeSum,0)  + %s , cmdFeeSumMonth = ifnull(cmdFeeSumMonth,0) + %s where imsi = %s '
+    else :
+        _sql = 'update imsi_users set lastCmdTime = %s , cmdFeeSum = ifnull(cmdFeeSum,0) + %s , cmdFeeSumMonth = %s where imsi = %s '
+    dbConfig=torndb.Connection(config.GLOBAL_SETTINGS['config_db']['host'],config.GLOBAL_SETTINGS['config_db']['name'],config.GLOBAL_SETTINGS['config_db']['user'],config.GLOBAL_SETTINGS['config_db']['psw'])
+    dbConfig.execute(_sql,_time_current,_total,_total,_user['imsi']) 
+
+def check_user_cmd_fee(_user):
+    if _user['cmdFeeSumMonth'] == None:
+        return True
+    elif int(_user['cmdFeeSumMonth']) < int(get_system_parameter_from_db('cmdFeeMonthLimit')):
+        return True
+    else :
+        return False
 
 def insert_req_log(_reqInfo):
     imsi=filter(str.isdigit, _reqInfo["imsi"])
