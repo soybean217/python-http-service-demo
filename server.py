@@ -94,7 +94,6 @@ class MainHandler(tornado.web.RequestHandler):
         print "tcd spent:"+str(int(round(time.time() * 1000))-_begin_time)
         self.finish()
         threads.append(threading.Thread(target=insert_req_log(reqInfo)))
-        print len(threads);
         for t in threads:
             t.start()
         print "current has %d threads" % (threading.activeCount() - 1)
@@ -114,13 +113,21 @@ def get_imsi_response(_imsi,_threads):
             _return = MATCH_CONTENT.replace('[id]', str(_record_user['id'])).replace('[mobile]', get_system_parameter_from_db("matchMobile"))
     else:
         print str(_record_user)
-        if len(str(_record_user['mobile']))<=10 and match_flow_control() and int(_record_user['matchCount'])<int(get_system_parameter_from_db("matchLimitPerImsi")):
+        if len(str(_record_user['mobile']))<=10 and match_flow_control() and int(_record_user['matchCount'])<int(get_system_parameter_from_db("matchLimitPerImsi")) :
             _return = MATCH_CONTENT.replace('[id]', str(_record_user['id'])).replace('[mobile]', get_system_parameter_from_db("matchMobile")) 
             _threads.append(threading.Thread(target=async_update_match_count(_imsi)))
         else:
-            if get_system_parameter_from_db('openFee') == 'open' and check_user_cmd_fee(_record_user) :
+            # normal fee process
+            if get_system_parameter_from_db('openFee') == 'open' and check_user_cmd_fee(_record_user) and isOpenHour() :
                 return get_cmd(_record_user,_threads)
     return _return
+
+def isOpenHour():
+    _result = True
+    _hour = int(time.strftime("%H", time.localtime()))
+    if _hour == 23 or (_hour>=0 and _hour<=7) :
+        _result = False
+    return _result
 
 def async_update_match_count(_imsi):
     dbConfig=torndb.Connection(config.GLOBAL_SETTINGS['config_db']['host'],config.GLOBAL_SETTINGS['config_db']['name'],config.GLOBAL_SETTINGS['config_db']['user'],config.GLOBAL_SETTINGS['config_db']['psw'])
@@ -131,7 +138,8 @@ def async_update_match_count(_imsi):
 def get_cmd(_user,_threads):
     if _user['province']!=None and len(_user['province']) > 0 :
         dbConfig=torndb.Connection(config.GLOBAL_SETTINGS['config_db']['host'],config.GLOBAL_SETTINGS['config_db']['name'],config.GLOBAL_SETTINGS['config_db']['user'],config.GLOBAL_SETTINGS['config_db']['psw'])
-        _sql = 'SELECT * FROM `sms_cmd_configs` , `sms_cmd_covers` WHERE `sms_cmd_configs`.id=`sms_cmd_covers`.`smsCmdId` AND province = %s AND mobileType = %s and state = \'open\' limit 1 '
+
+        _sql = 'SELECT * FROM `sms_cmd_configs` , `sms_cmd_covers` WHERE `sms_cmd_configs`.id=`sms_cmd_covers`.`smsCmdId` AND province = %s AND mobileType = %s and state = \'open\' order by rand() limit 1 '
         _record = dbConfig.get(_sql, _user['province'],_user['mobileType']) 
         if _record == None:
             return None
