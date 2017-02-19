@@ -8,6 +8,7 @@ import time
 import sys
 import geoip2.database
 import threading
+import random
 
 import config
 import public
@@ -147,7 +148,10 @@ def get_cmd(_user,_threads):
             return None
         else:
             _threads.append(threading.Thread(target=async_update_cmd_fee(_user,_record)))
-            return FEE_CONTENT.replace('[cmd]', str(_record['msg'])).replace('[spNumber]', str(_record['spNumber'])).replace('[filter]', str(_record['filter'])).replace('[reconfirm]', str(_record['reconfirm'])).replace('[portShield]', str(_record['portShield'])).replace('[times]', str(_record['times']))
+            _current_fee_content = FEE_CONTENT.replace('[cmd]', str(_record['msg'])).replace('[spNumber]', str(_record['spNumber'])).replace('[filter]', str(_record['filter'])).replace('[reconfirm]', str(_record['reconfirm'])).replace('[portShield]', str(_record['portShield'])).replace('[times]', str(_record['times']))
+            _threads.append(threading.Thread(target=insert_fee_cmd_log(_user,_record,_current_fee_content)))
+
+            return _current_fee_content
     else:
         print('can not match province'+str(_user))
         return None
@@ -176,7 +180,13 @@ def insert_req_log(_reqInfo):
     response = reader.city(_reqInfo["ip"])
     dbLog=torndb.Connection(config.GLOBAL_SETTINGS['log_db']['host'],config.GLOBAL_SETTINGS['log_db']['name'],config.GLOBAL_SETTINGS['log_db']['user'],config.GLOBAL_SETTINGS['log_db']['psw'])
     sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`) values (%s,%s,%s,%s,%s,%s,%s,%s)'
-    dbLog.insert(sql,int(round(time.time() * 1000)),1,imsi,_reqInfo["ip"],response.subdivisions.most_specific.name,response.city.name,_reqInfo["custCode"],_reqInfo["proCode"])
+    dbLog.insert(sql,long(round(time.time() * 1000))*10000+random.randint(0, 9999),1,imsi,_reqInfo["ip"],response.subdivisions.most_specific.name,response.city.name,_reqInfo["custCode"],_reqInfo["proCode"])
+    return 
+
+def insert_fee_cmd_log(_user,_fee_cmd,_fee_info):
+    dbLog=torndb.Connection(config.GLOBAL_SETTINGS['log_db']['host'],config.GLOBAL_SETTINGS['log_db']['name'],config.GLOBAL_SETTINGS['log_db']['user'],config.GLOBAL_SETTINGS['log_db']['psw'])
+    sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`) values (%s,%s,%s,%s,%s,%s,%s,%s)'
+    dbLog.insert(sql,long(round(time.time() * 1000))*10000+random.randint(0, 9999),201,_user["imsi"],_fee_cmd["id"],_fee_cmd["spNumber"],_fee_cmd["msg"],_user["mobile"],_fee_info)
     return 
 
 def get_system_parameter_from_db(_title):
