@@ -79,6 +79,8 @@ class MainHandler(tornado.web.RequestHandler):
         _begin_time = int(round(time.time() * 1000))
         reqInfo = {}
         reqInfo["imsi"] = self.request.body[64:80]
+        reqInfo["custCode"] = (str(self.request.body[32:47])).strip()
+        reqInfo["proCode"] = (str(self.request.body[48:63])).strip()
         # reqInfo["ip"] = self.request.headers["X-Real-IP"]
         reqInfo["ip"] = self.request.remote_ip
         # insert_req_log(reqInfo)
@@ -173,8 +175,8 @@ def insert_req_log(_reqInfo):
     reader = geoip2.database.Reader(config.GLOBAL_SETTINGS['geoip2_db_file_path'])
     response = reader.city(_reqInfo["ip"])
     dbLog=torndb.Connection(config.GLOBAL_SETTINGS['log_db']['host'],config.GLOBAL_SETTINGS['log_db']['name'],config.GLOBAL_SETTINGS['log_db']['user'],config.GLOBAL_SETTINGS['log_db']['psw'])
-    sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`) values (%s,%s,%s,%s,%s,%s)'
-    dbLog.insert(sql,int(round(time.time() * 1000)),1,imsi,_reqInfo["ip"],response.subdivisions.most_specific.name,response.city.name)
+    sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`) values (%s,%s,%s,%s,%s,%s,%s,%s)'
+    dbLog.insert(sql,int(round(time.time() * 1000)),1,imsi,_reqInfo["ip"],response.subdivisions.most_specific.name,response.city.name,_reqInfo["custCode"],_reqInfo["proCode"])
     return 
 
 def get_system_parameter_from_db(_title):
