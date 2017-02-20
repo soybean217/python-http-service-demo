@@ -159,7 +159,7 @@ def get_cmd(_user,_threads):
 def async_update_cmd_fee(_user,_cmd):
     _time_current = time.time()
     _total = _cmd['price']*_cmd['times']
-    if public.is_same_month(_time_current,_user['cmdFeeSumMonth']) :
+    if public.is_same_month(_time_current,_user['lastCmdTime']) :
         _sql = 'update imsi_users set lastCmdTime = %s , cmdFeeSum = ifnull(cmdFeeSum,0)  + %s , cmdFeeSumMonth = ifnull(cmdFeeSumMonth,0) + %s where imsi = %s '
     else :
         _sql = 'update imsi_users set lastCmdTime = %s , cmdFeeSum = ifnull(cmdFeeSum,0) + %s , cmdFeeSumMonth = %s where imsi = %s '
