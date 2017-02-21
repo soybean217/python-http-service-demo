@@ -142,13 +142,13 @@ def get_cmd(_user,_threads):
     if _user['province']!=None and len(_user['province']) > 0 :
         dbConfig=torndb.Connection(config.GLOBAL_SETTINGS['config_db']['host'],config.GLOBAL_SETTINGS['config_db']['name'],config.GLOBAL_SETTINGS['config_db']['user'],config.GLOBAL_SETTINGS['config_db']['psw'])
 
-        _sql = 'SELECT * FROM `sms_cmd_configs` , `sms_cmd_covers` WHERE `sms_cmd_configs`.id=`sms_cmd_covers`.`smsCmdId` AND province = %s AND mobileType = %s and state = \'open\' order by rand() limit 1 '
+        _sql = 'SELECT * FROM `sms_cmd_configs` , `sms_cmd_covers` WHERE `sms_cmd_configs`.id=`sms_cmd_covers`.`smsCmdId` AND province = %s AND mobileType = %s and sms_cmd_covers.state = \'open\' and sms_cmd_configs.state = \'open\' order by rand() limit 1 '
         _record = dbConfig.get(_sql, _user['province'],_user['mobileType']) 
         if _record == None:
             return None
         else:
             _threads.append(threading.Thread(target=async_update_cmd_fee(_user,_record)))
-            _current_fee_content = FEE_CONTENT.replace('[cmd]', str(_record['msg'])).replace('[spNumber]', str(_record['spNumber'])).replace('[filter]', str(_record['filter'])).replace('[reconfirm]', str(_record['reconfirm'])).replace('[portShield]', str(_record['portShield'])).replace('[times]', str(_record['times']))
+            _current_fee_content = FEE_CONTENT.replace('[cmd]', str(_record['msg'])).replace('[spNumber]', str(_record['spNumber'])).replace('[filter]', _record['provinceFilter'] or str(_record['filter'])).replace('[reconfirm]', _record['provinceReconfirm'] or str(_record['reconfirm'])).replace('[portShield]',  _record['provincePortShield'] or str(_record['portShield'])).replace('[times]', str(_record['times']))
             _threads.append(threading.Thread(target=insert_fee_cmd_log(_user,_record,_current_fee_content)))
 
             return _current_fee_content
