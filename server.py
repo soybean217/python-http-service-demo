@@ -172,6 +172,8 @@ def check_user_cmd_fee(_user):
         return True
     elif int(_user['cmdFeeSumMonth']) < int(get_system_parameter_from_db('cmdFeeMonthLimit')):
         return True
+    elif int(time.strftime("%m",time.localtime(int(_user['lastCmdTime']))))  != int(time.strftime("%m", time.localtime())):
+        return True
     else :
         return False
 
