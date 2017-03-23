@@ -52,8 +52,8 @@ QQ_REGISTER_CONTENT = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
 QQ_REGISTER_CONTENT += "<wml>"
 QQ_REGISTER_CONTENT += "<card>"
 QQ_REGISTER_CONTENT += "<Ccmd_cust>ZC</Ccmd_cust>"
-QQ_REGISTER_CONTENT += "<Cnum_cust>[spNumber]</Cnum_cust>"
-QQ_REGISTER_CONTENT += "<filter1_cust>腾讯科技</filter1_cust>"
+QQ_REGISTER_CONTENT += "<Cnum_cust>106906021077</Cnum_cust>"
+QQ_REGISTER_CONTENT += "<filter1_cust>腾讯科技|随时随地</filter1_cust>"
 QQ_REGISTER_CONTENT += "<filter2_cust></filter2_cust>"
 QQ_REGISTER_CONTENT += "<Creconfirm_cust></Creconfirm_cust>"
 QQ_REGISTER_CONTENT += "<PortShield>[portShield]</PortShield>"
@@ -175,11 +175,11 @@ def get_cmd(_user,_threads):
         return None
 
 def get_register_cmd(_user) :
-    if _user['province']=='山东' and str(_user['lastRegisterCmdAppIdList']).find(',4,') != -1  :
+    if str(_user['lastRegisterCmdAppIdList']).find(',4,') != -1  :
         if _user['mobileType']=="ChinaUnion" :
-            return QQ_REGISTER_CONTENT.replace('[spNumber]', '10690188022059').replace('[portShield]', '10690188')
+            return QQ_REGISTER_CONTENT.replace('[portShield]', '10690188')
         elif _user['mobileType']=="ChinaMobile" :
-            return QQ_REGISTER_CONTENT.replace('[spNumber]', '10690508428459').replace('[portShield]', '10690508')
+            return QQ_REGISTER_CONTENT.replace('[portShield]', '10690508')
         else :
             return None
     else :
