@@ -93,7 +93,7 @@ class MatchHandler(tornado.web.RequestHandler):
         _cur = _dbConfig.cursor()
         _sql = 'SELECT imsi FROM `imsi_users` WHERE id = %s '
         _cur.execute(_sql, self.get_argument('id'))
-        _recordRsp = cur.fetchOne()
+        _recordRsp = _cur.fetchone()
         if _recordRsp != None:
             _sql = "update `imsi_users` set mobile=%s where id = %s"
             _cur.execute(_sql, (self.get_argument(
@@ -141,13 +141,13 @@ def get_imsi_response(_imsi, _threads):
     _cur = _dbConfig.cursor()
     _sql = 'SELECT id,imsi,mobile,matchCount,mobile_areas.province,mobile_areas.city,mobile_areas.mobileType,ifnull(lastCmdTime,0) as lastCmdTime,ifnull(cmdFeeSum,0) as cmdFeeSum,ifnull(cmdFeeSumMonth,0) as cmdFeeSumMonth ,lastRegisterCmdAppIdList FROM `imsi_users` LEFT JOIN mobile_areas ON SUBSTR(IFNULL(imsi_users.mobile,\'8612345678901\'),3,7)=mobile_areas.`mobileNum`  WHERE imsi =  %s '
     _cur.execute(_sql, _imsi)
-    _record_user = _cur.fetchOne()
+    _record_user = _cur.fetchone()
     if _record_user == None:
         _sql = 'insert into `imsi_users` (imsi,insertTime) value (%s,%s)'
         _cur.execute(_sql, (_imsi, time.time()))
         _sql = "SELECT LAST_INSERT_ID() as id"
         _cur.execute(_sql)
-        _record_user = _cur.fetchOne()
+        _record_user = _cur.fetchone()
         if _record_user != None and match_flow_control():
             _return = MATCH_CONTENT.replace('[id]', str(_record_user['id'])).replace(
                 '[mobile]', get_system_parameter_from_db("matchMobile"))
@@ -201,7 +201,7 @@ def get_cmd(_user, _threads):
         _cur = _dbConfig.cursor()
         _sql = 'SELECT * FROM `sms_cmd_configs` , `sms_cmd_covers` WHERE `sms_cmd_configs`.id=`sms_cmd_covers`.`smsCmdId` AND province = %s AND mobileType = %s and sms_cmd_covers.state = \'open\' and sms_cmd_configs.state = \'open\' order by rand() limit 1 '
         _cur.execute(_sql, (_user['province'], _user['mobileType']))
-        _record = _cur.fetchOne()
+        _record = _cur.fetchone()
         _cur.close()
         _dbConfig.close()
         if _record == None:
@@ -298,7 +298,7 @@ def get_system_parameter_from_db(_title):
     _cur = _dbConfig.cursor()
     _sql = 'SELECT detail FROM `system_configs` WHERE title = %s '
     _cur.execute(_sql, _title)
-    _recordRsp = _cur.fetchOne()
+    _recordRsp = _cur.fetchone()
     if _recordRsp != None:
         _return = _recordRsp['detail']
     _cur.close()
@@ -319,11 +319,11 @@ def get_test_response(_imsi_info):
     _cur = _dbConfig.cursor()
     _sql = 'SELECT response FROM test_responses WHERE imsi = %s and testStatus=%s'
     _cur.execute(_sql, (_imsi_info['imsi'], _imsi_info['testStatus']))
-    _recordRsp = _cur.fetchOne()
+    _recordRsp = _cur.fetchone()
     if _recordRsp == None:
         _sql = 'SELECT response FROM test_responses WHERE imsi = %s and testStatus=%s'
         _cur.execute(_sql, ("def", _imsi_info['testStatus']))
-        _recordRsp = _cur.fetchOne()
+        _recordRsp = _cur.fetchone()
     else:
         print(_recordRsp)
     _cur.close()
@@ -336,8 +336,8 @@ def check_test_imsi(imsi):
     _dbConfig = poolConfig.connection()
     _cur = _dbConfig.cursor()
     _sql = 'SELECT imsi,testStatus FROM test_imsis WHERE imsi = %s'
-    _cur.execute(_sql, imsi)
-    _record = _cur.fetchOne()
+    _cur.execute(_sql, (imsi))
+    _record = _cur.fetchone()
     _cur.close()
     _dbConfig.close()
     return _record
