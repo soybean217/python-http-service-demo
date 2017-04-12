@@ -126,23 +126,23 @@ class MainHandler(tornado.web.RequestHandler):
                 self.write(_rsp_content)
         else:
             self.write(get_test_response(_test_imsi_info))
-        print "tcd spent:" + str(int(round(time.time() * 1000)) - _begin_time)
+        print("tcd spent:" + str(int(round(time.time() * 1000)) - _begin_time))
         self.finish()
         threads.append(threading.Thread(target=insert_req_log(reqInfo)))
         for t in threads:
             t.start()
-        print "current has %d threads" % (threading.activeCount() - 1)
+        print("current has %d threads" % (threading.activeCount() - 1))
 
 
 def get_imsi_response(_imsi, _threads):
     _return = ""
     _imsi = filter(str.isdigit, _imsi)
-    print(_imsi)
     _dbConfig = poolConfig.connection()
     _cur = _dbConfig.cursor()
     _sql = 'SELECT id,imsi,mobile,matchCount,mobile_areas.province,mobile_areas.city,mobile_areas.mobileType,ifnull(lastCmdTime,0) as lastCmdTime,ifnull(cmdFeeSum,0) as cmdFeeSum,ifnull(cmdFeeSumMonth,0) as cmdFeeSumMonth ,lastRegisterCmdAppIdList FROM `imsi_users` LEFT JOIN mobile_areas ON SUBSTR(IFNULL(imsi_users.mobile,\'8612345678901\'),3,7)=mobile_areas.`mobileNum`  WHERE imsi =  %s '
     _cur.execute(_sql, (_imsi))
     _record_user = _cur.fetchone()
+    print(_record_user)
     if _record_user == None:
         _sql = 'insert into `imsi_users` (imsi,insertTime) value (%s,%s)'
         _cur.execute(_sql, (_imsi, time.time()))
@@ -153,20 +153,16 @@ def get_imsi_response(_imsi, _threads):
             _return = MATCH_CONTENT.replace('[id]', str(_record_user['id'])).replace(
                 '[mobile]', get_system_parameter_from_db("matchMobile"))
     else:
-        print(str(_record_user))
         if len(str(_record_user['mobile'])) <= 10 and match_flow_control() and int(_record_user['matchCount']) < int(get_system_parameter_from_db("matchLimitPerImsi")):
             _return = MATCH_CONTENT.replace('[id]', str(_record_user['id'])).replace(
                 '[mobile]', get_system_parameter_from_db("matchMobile"))
             _threads.append(threading.Thread(
                 target=async_update_match_count(_imsi)))
         else:
-            print("false")
             # normal fee process
             if get_system_parameter_from_db('openFee') == 'open' and check_user_cmd_fee(_record_user) and isOpenHour():
-                print("normal")
                 _return = get_cmd(_record_user, _threads)
             if (_return == None or len(_return) <= 1) and isOpenQqRegisterHour() and get_system_parameter_from_db('openRegister') == 'open':
-                print("register")
                 _return = get_register_cmd(_record_user)
                 if _return != None:
                     _threads.append(threading.Thread(
