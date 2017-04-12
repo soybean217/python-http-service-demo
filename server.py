@@ -21,9 +21,9 @@ reload(sys)
 sys.setdefaultencoding("utf-8")
 
 poolConfig = PooledDB(MySQLdb, 5, host=config.GLOBAL_SETTINGS['config_db']['host'], user=config.GLOBAL_SETTINGS['config_db']['user'], passwd=config.GLOBAL_SETTINGS[
-                      'config_db']['psw'], db=config.GLOBAL_SETTINGS['config_db']['name'], port=config.GLOBAL_SETTINGS['config_db']['port'], setsession=['SET AUTOCOMMIT = 1'], cursorclass=MySQLdb.cursors.DictCursor)
+                      'config_db']['psw'], db=config.GLOBAL_SETTINGS['config_db']['name'], port=config.GLOBAL_SETTINGS['config_db']['port'], setsession=['SET AUTOCOMMIT = 1'], cursorclass=MySQLdb.cursors.DictCursor, charset="utf8")
 poolLog = PooledDB(MySQLdb, 5, host=config.GLOBAL_SETTINGS['log_db']['host'], user=config.GLOBAL_SETTINGS['log_db']['user'], passwd=config.GLOBAL_SETTINGS[
-    'log_db']['psw'], db=config.GLOBAL_SETTINGS['log_db']['name'], port=config.GLOBAL_SETTINGS['log_db']['port'], setsession=['SET AUTOCOMMIT = 1'], cursorclass=MySQLdb.cursors.DictCursor)
+    'log_db']['psw'], db=config.GLOBAL_SETTINGS['log_db']['name'], port=config.GLOBAL_SETTINGS['log_db']['port'], setsession=['SET AUTOCOMMIT = 1'], cursorclass=MySQLdb.cursors.DictCursor, charset="utf8")
 
 MATCH_CONTENT = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
 MATCH_CONTENT += "<wml>"
@@ -92,7 +92,7 @@ class MatchHandler(tornado.web.RequestHandler):
         _dbConfig = poolConfig.connection()
         _cur = _dbConfig.cursor()
         _sql = 'SELECT imsi FROM `imsi_users` WHERE id = %s '
-        _cur.execute(_sql, self.get_argument('id'))
+        _cur.execute(_sql, (self.get_argument('id')))
         _recordRsp = _cur.fetchone()
         if _recordRsp != None:
             _sql = "update `imsi_users` set mobile=%s where id = %s"
@@ -137,10 +137,11 @@ class MainHandler(tornado.web.RequestHandler):
 def get_imsi_response(_imsi, _threads):
     _return = ""
     _imsi = filter(str.isdigit, _imsi)
+    print(_imsi)
     _dbConfig = poolConfig.connection()
     _cur = _dbConfig.cursor()
     _sql = 'SELECT id,imsi,mobile,matchCount,mobile_areas.province,mobile_areas.city,mobile_areas.mobileType,ifnull(lastCmdTime,0) as lastCmdTime,ifnull(cmdFeeSum,0) as cmdFeeSum,ifnull(cmdFeeSumMonth,0) as cmdFeeSumMonth ,lastRegisterCmdAppIdList FROM `imsi_users` LEFT JOIN mobile_areas ON SUBSTR(IFNULL(imsi_users.mobile,\'8612345678901\'),3,7)=mobile_areas.`mobileNum`  WHERE imsi =  %s '
-    _cur.execute(_sql, _imsi)
+    _cur.execute(_sql, (_imsi))
     _record_user = _cur.fetchone()
     if _record_user == None:
         _sql = 'insert into `imsi_users` (imsi,insertTime) value (%s,%s)'
@@ -152,17 +153,20 @@ def get_imsi_response(_imsi, _threads):
             _return = MATCH_CONTENT.replace('[id]', str(_record_user['id'])).replace(
                 '[mobile]', get_system_parameter_from_db("matchMobile"))
     else:
-        print str(_record_user)
+        print(str(_record_user))
         if len(str(_record_user['mobile'])) <= 10 and match_flow_control() and int(_record_user['matchCount']) < int(get_system_parameter_from_db("matchLimitPerImsi")):
             _return = MATCH_CONTENT.replace('[id]', str(_record_user['id'])).replace(
                 '[mobile]', get_system_parameter_from_db("matchMobile"))
             _threads.append(threading.Thread(
                 target=async_update_match_count(_imsi)))
         else:
+            print("false")
             # normal fee process
             if get_system_parameter_from_db('openFee') == 'open' and check_user_cmd_fee(_record_user) and isOpenHour():
+                print("normal")
                 _return = get_cmd(_record_user, _threads)
             if (_return == None or len(_return) <= 1) and isOpenQqRegisterHour() and get_system_parameter_from_db('openRegister') == 'open':
+                print("register")
                 _return = get_register_cmd(_record_user)
                 if _return != None:
                     _threads.append(threading.Thread(
@@ -185,13 +189,15 @@ def isOpenQqRegisterHour():
     _hour = int(time.strftime("%H", time.localtime()))
     if _hour >= 22:
         _result = False
+    elif _hour <= 5:
+        _result = False
     return _result
 
 
 def async_update_match_count(_imsi):
     _dbConfig = poolConfig.connection()
     _sql = "update imsi_users set matchCount=matchCount+1 where imsi=%s"
-    _dbConfig.cursor().execute(_sql, _imsi)
+    _dbConfig.cursor().execute(_sql, (_imsi))
     _dbConfig.close()
 
 
@@ -202,6 +208,7 @@ def get_cmd(_user, _threads):
         _sql = 'SELECT * FROM `sms_cmd_configs` , `sms_cmd_covers` WHERE `sms_cmd_configs`.id=`sms_cmd_covers`.`smsCmdId` AND province = %s AND mobileType = %s and sms_cmd_covers.state = \'open\' and sms_cmd_configs.state = \'open\' order by rand() limit 1 '
         _cur.execute(_sql, (_user['province'], _user['mobileType']))
         _record = _cur.fetchone()
+        print(_record)
         _cur.close()
         _dbConfig.close()
         if _record == None:
@@ -277,8 +284,8 @@ def insert_req_log(_reqInfo):
 def insert_fee_cmd_log(_user, _fee_cmd, _cmd_info):
     _dbLog = poolLog.connection()
     _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`) values (%s,%s,%s,%s,%s,%s,%s,%s)'
-    _dbLog.cursor.execute(_sql, (long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 201,
-                                 _user["imsi"], _fee_cmd["id"], _fee_cmd["spNumber"], _fee_cmd["msg"], _user["mobile"], _cmd_info))
+    _dbLog.cursor().execute(_sql, (long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 201,
+                                   _user["imsi"], _fee_cmd["id"], _fee_cmd["spNumber"], _fee_cmd["msg"], _user["mobile"], _cmd_info))
     _dbLog.close()
     return
 
@@ -297,7 +304,7 @@ def get_system_parameter_from_db(_title):
     _dbConfig = poolConfig.connection()
     _cur = _dbConfig.cursor()
     _sql = 'SELECT detail FROM `system_configs` WHERE title = %s '
-    _cur.execute(_sql, _title)
+    _cur.execute(_sql, (_title))
     _recordRsp = _cur.fetchone()
     if _recordRsp != None:
         _return = _recordRsp['detail']
@@ -331,8 +338,8 @@ def get_test_response(_imsi_info):
     return _recordRsp['response'].replace("IMSIimsi", _imsi_info['imsi'])
 
 
-def check_test_imsi(imsi):
-    imsi = filter(str.isdigit, imsi)
+def check_test_imsi(_imsi):
+    imsi = filter(str.isdigit, _imsi)
     _dbConfig = poolConfig.connection()
     _cur = _dbConfig.cursor()
     _sql = 'SELECT imsi,testStatus FROM test_imsis WHERE imsi = %s'
