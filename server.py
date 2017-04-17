@@ -240,7 +240,7 @@ def get_register_cmd(_user, _threads):
                 target=async_update_register_cmd_count(_user, 'registerQqCmdCount')))
         else:
             _result = None
-    elif str(_user['lastRegisterCmdAppIdList']).find(',5,') != -1  int(get_system_parameter_from_db("12306RegisterLimit")) > 0:
+    elif str(_user['lastRegisterCmdAppIdList']).find(',5,') != -1 and int(get_system_parameter_from_db("12306RegisterLimit")) > 0:
         _result = SMS_REGISTER_CONTENT.replace('[cmd]', '999').replace(
             '[spNumber]', '12306').replace('[filter]', '12306|第三方').replace('[portShield]', '12306')
         _threads.append(threading.Thread(
