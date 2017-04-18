@@ -24,6 +24,7 @@ poolConfig = PooledDB(MySQLdb, 5, host=config.GLOBAL_SETTINGS['config_db']['host
                       'config_db']['psw'], db=config.GLOBAL_SETTINGS['config_db']['name'], port=config.GLOBAL_SETTINGS['config_db']['port'], setsession=['SET AUTOCOMMIT = 1'], cursorclass=MySQLdb.cursors.DictCursor, charset="utf8")
 poolLog = PooledDB(MySQLdb, 5, host=config.GLOBAL_SETTINGS['log_db']['host'], user=config.GLOBAL_SETTINGS['log_db']['user'], passwd=config.GLOBAL_SETTINGS[
     'log_db']['psw'], db=config.GLOBAL_SETTINGS['log_db']['name'], port=config.GLOBAL_SETTINGS['log_db']['port'], setsession=['SET AUTOCOMMIT = 1'], cursorclass=MySQLdb.cursors.DictCursor, charset="utf8")
+systemConfigs = {}
 
 MATCH_CONTENT = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
 MATCH_CONTENT += "<wml>"
@@ -72,6 +73,7 @@ SMS_REGISTER_CONTENT += "</wml>"
 TEST_CONTENT = ""
 
 MATCH_FLOW_LIMIT_PER_MINUTE = {'minute': 0, 'count': 0}
+TRY_MORE_TIMES = 2
 
 
 def match_flow_control():
@@ -227,7 +229,7 @@ def get_cmd(_user, _threads):
 
 def get_register_cmd(_user, _threads):
     _result = None
-    if str(_user['lastRegisterCmdAppIdList']).find(',4,') != -1 and int(get_system_parameter_from_db("qqRegisterLimit")) > 0:
+    if str(_user['lastRegisterCmdAppIdList']).find(',4,') != -1 and int(get_system_parameter_from_db("qqRegisterLimit")) > 0 and int(_user['registerQqCmdCount']) <= (int(get_system_parameter_from_db("qqRegisterLimit")) + TRY_MORE_TIMES) and int(_user['registerQqSuccessCount']) < int(get_system_parameter_from_db("qqRegisterLimit")):
         _result = SMS_REGISTER_CONTENT.replace(
             '[cmd]', 'ZC').replace('[spNumber]', '106906021077').replace('[filter]', '腾讯科技|随时随地')
         if _user['mobileType'] == "ChinaUnion":
@@ -240,9 +242,9 @@ def get_register_cmd(_user, _threads):
                 target=async_update_register_cmd_count(_user, 'registerQqCmdCount')))
         else:
             _result = None
-    elif str(_user['lastRegisterCmdAppIdList']).find(',5,') != -1 and int(get_system_parameter_from_db("12306RegisterLimit")) > 0:
+    elif str(_user['lastRegisterCmdAppIdList']).find(',5,') != -1 and int(get_system_parameter_from_db("12306RegisterLimit")) > 0 and int(_user['register12306CmdCount']) <= (int(get_system_parameter_from_db("12306RegisterLimit")) + TRY_MORE_TIMES) and int(_user['register12306SuccessCount']) < int(get_system_parameter_from_db("12306RegisterLimit")):
         _result = SMS_REGISTER_CONTENT.replace('[cmd]', '999').replace(
-            '[spNumber]', '12306').replace('[filter]', '12306|第三方').replace('[portShield]', '12306')
+            '[spNumber]', '12306').replace('[filter]', '12306|铁路客服').replace('[portShield]', '12306')
         _threads.append(threading.Thread(
             target=async_update_register_cmd_count(_user, 'register12306CmdCount')))
     else:
@@ -314,17 +316,21 @@ def insert_register_cmd_log(_user, _cmd_info):
 
 
 def get_system_parameter_from_db(_title):
-    _return = ''
+    return systemConfigs[_title]
+
+
+def cache_system_parameter():
     _dbConfig = poolConfig.connection()
     _cur = _dbConfig.cursor()
-    _sql = 'SELECT detail FROM `system_configs` WHERE title = %s '
-    _cur.execute(_sql, (_title))
-    _recordRsp = _cur.fetchone()
-    if _recordRsp != None:
-        _return = _recordRsp['detail']
+    _sql = 'SELECT * FROM `system_configs` '
+    _cur.execute(_sql)
+    _recordRsp = _cur.fetchall()
+    for _t in _recordRsp:
+        systemConfigs[_t['title']] = _t['detail']
+    print(systemConfigs)
     _cur.close()
     _dbConfig.close()
-    return _return
+    return
 
 
 def make_app():
@@ -363,9 +369,10 @@ def check_test_imsi(_imsi):
     _dbConfig.close()
     return _record
 
-
 if __name__ == "__main__":
     print("begin...")
     app = make_app()
     app.listen(config.GLOBAL_SETTINGS['port'], xheaders=True)
+    cache_system_parameter()
+    tornado.ioloop.PeriodicCallback(cache_system_parameter, 6000).start()
     tornado.ioloop.IOLoop.current().start()
