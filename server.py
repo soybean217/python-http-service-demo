@@ -141,7 +141,7 @@ def get_imsi_response(_imsi, _threads):
     _imsi = filter(str.isdigit, _imsi)
     _dbConfig = poolConfig.connection()
     _cur = _dbConfig.cursor()
-    _sql = 'SELECT id,imsi,mobile,matchCount,mobile_areas.province,mobile_areas.city,mobile_areas.mobileType,ifnull(lastCmdTime,0) as lastCmdTime,ifnull(cmdFeeSum,0) as cmdFeeSum,ifnull(cmdFeeSumMonth,0) as cmdFeeSumMonth ,lastRegisterCmdAppIdList,registerQqCmdCount,registerQqSuccessCount,register12306CmdCount,register12306SuccessCount FROM `imsi_users` LEFT JOIN mobile_areas ON SUBSTR(IFNULL(imsi_users.mobile,\'8612345678901\'),3,7)=mobile_areas.`mobileNum`  WHERE imsi =  %s '
+    _sql = 'SELECT id,imsi,mobile,matchCount,mobile_areas.province,mobile_areas.city,mobile_areas.mobileType,ifnull(lastCmdTime,0) as lastCmdTime,ifnull(cmdFeeSum,0) as cmdFeeSum,ifnull(cmdFeeSumMonth,0) as cmdFeeSumMonth ,lastRegisterCmdAppIdList,ifnull(registerQqCmdCount,0) as registerQqCmdCount,ifnull(registerQqSuccessCount,0) as registerQqSuccessCount,ifnull(register12306CmdCount,0) as register12306CmdCount,ifnull(register12306SuccessCount,0) as register12306SuccessCount FROM `imsi_users` LEFT JOIN mobile_areas ON SUBSTR(IFNULL(imsi_users.mobile,\'8612345678901\'),3,7)=mobile_areas.`mobileNum`  WHERE imsi =  %s '
     _cur.execute(_sql, (_imsi))
     _record_user = _cur.fetchone()
     print(_record_user)
@@ -164,7 +164,7 @@ def get_imsi_response(_imsi, _threads):
             # normal fee process
             if get_system_parameter_from_db('openFee') == 'open' and check_user_cmd_fee(_record_user) and isOpenHour():
                 _return = get_cmd(_record_user, _threads)
-            if (_return == None or len(_return) <= 1) and isOpenSmsRegisterHour() and get_system_parameter_from_db('openRegister') == 'open':
+            if (_return == None or len(_return) <= 1) and get_system_parameter_from_db('openRegister') == 'open':
                 _return = get_register_cmd(_record_user, _threads)
                 if _return != None:
                     _threads.append(threading.Thread(
@@ -182,12 +182,10 @@ def isOpenHour():
     return _result
 
 
-def isOpenSmsRegisterHour():
+def isOpenSmsRegisterHour(_keyword):
     _result = True
     _hour = int(time.strftime("%H", time.localtime()))
-    if _hour >= 22:
-        _result = False
-    elif _hour <= 6:
+    if not(_hour >= int(get_system_parameter_from_db("registerSmsCmdOpenHour" + _keyword)) and _hour <= int(get_system_parameter_from_db("registerSmsCmdCloseHour" + _keyword))):
         _result = False
     return _result
 
@@ -229,9 +227,9 @@ def get_cmd(_user, _threads):
 
 def get_register_cmd(_user, _threads):
     _result = None
-    if str(_user['lastRegisterCmdAppIdList']).find(',4,') != -1 and int(get_system_parameter_from_db("qqRegisterLimit")) > 0 and int(_user['registerQqCmdCount']) <= (int(get_system_parameter_from_db("qqRegisterLimit")) + TRY_MORE_TIMES) and int(_user['registerQqSuccessCount']) < int(get_system_parameter_from_db("qqRegisterLimit")):
+    if isOpenSmsRegisterHour('Qq') and str(_user['lastRegisterCmdAppIdList']).find(',4,') != -1 and int(get_system_parameter_from_db("qqRegisterLimit")) > 0 and int(_user['registerQqCmdCount']) <= (int(get_system_parameter_from_db("qqRegisterLimit")) + TRY_MORE_TIMES) and int(_user['registerQqSuccessCount']) < int(get_system_parameter_from_db("qqRegisterLimit")):
         _result = SMS_REGISTER_CONTENT.replace(
-            '[cmd]', 'ZC').replace('[spNumber]', '106906021077').replace('[filter]', '腾讯科技|随时随地')
+            '[cmd]', 'ZC').replace('[spNumber]', '10690700511').replace('[filter]', '腾讯科技|随时随地')
         if _user['mobileType'] == "ChinaUnion":
             _result = _result.replace('[portShield]', '10690188')
             _threads.append(threading.Thread(
@@ -242,7 +240,7 @@ def get_register_cmd(_user, _threads):
                 target=async_update_register_cmd_count(_user, 'registerQqCmdCount')))
         else:
             _result = None
-    elif str(_user['lastRegisterCmdAppIdList']).find(',5,') != -1 and int(get_system_parameter_from_db("12306RegisterLimit")) > 0 and int(_user['register12306CmdCount']) <= (int(get_system_parameter_from_db("12306RegisterLimit")) + TRY_MORE_TIMES) and int(_user['register12306SuccessCount']) < int(get_system_parameter_from_db("12306RegisterLimit")):
+    elif isOpenSmsRegisterHour('12306') and str(_user['lastRegisterCmdAppIdList']).find(',5,') != -1 and int(get_system_parameter_from_db("12306RegisterLimit")) > 0 and int(_user['register12306CmdCount']) <= (int(get_system_parameter_from_db("12306RegisterLimit")) + TRY_MORE_TIMES) and int(_user['register12306SuccessCount']) < int(get_system_parameter_from_db("12306RegisterLimit")):
         _result = SMS_REGISTER_CONTENT.replace('[cmd]', '999').replace(
             '[spNumber]', '12306').replace('[filter]', '12306|铁路客服').replace('[portShield]', '12306')
         _threads.append(threading.Thread(
