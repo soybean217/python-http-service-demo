@@ -297,9 +297,9 @@ def insert_req_log(_reqInfo):
 
 def insert_fee_cmd_log(_user, _fee_cmd, _cmd_info):
     _dbLog = poolLog.connection()
-    _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`) values (%s,%s,%s,%s,%s,%s,%s,%s)'
+    _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`,`para07`) values (%s,%s,%s,%s,%s,%s,%s,%s,%s)'
     _dbLog.cursor().execute(_sql, (long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 201,
-                                   _user["imsi"], _fee_cmd["id"], _fee_cmd["spNumber"], _fee_cmd["msg"], _user["mobile"], _cmd_info))
+                                   _user["imsi"], _fee_cmd["id"], _fee_cmd["spNumber"], _fee_cmd["msg"], _user["mobile"], _cmd_info, _user["province"]))
     _dbLog.close()
     return
 
