@@ -119,16 +119,20 @@ class MainHandler(tornado.web.RequestHandler):
         reqInfo["proCode"] = (str(self.request.body[48:63])).strip()
         # reqInfo["ip"] = self.request.headers["X-Real-IP"]
         reqInfo["ip"] = self.request.remote_ip
+        reqInfo['rspContent'] = ''
         # insert_req_log(reqInfo)
         _test_imsi_info = check_test_imsi(reqInfo["imsi"])
         if _test_imsi_info == None:
             # process normal user
             _rsp_content = get_imsi_response(reqInfo["imsi"], threads)
+            reqInfo['rspContent'] = _rsp_content
             if _rsp_content != None:
                 print(_rsp_content)
                 self.write(_rsp_content)
         else:
-            self.write(get_test_response(_test_imsi_info))
+            _rsp_content = get_test_response(_test_imsi_info)
+            reqInfo['rspContent'] = _rsp_content
+            self.write(_rsp_content)
         print("tcd spent:" + str(int(round(time.time() * 1000)) - _begin_time))
         self.finish()
         threads.append(threading.Thread(target=insert_req_log(reqInfo)))
@@ -355,9 +359,9 @@ def insert_req_log(_reqInfo):
         config.GLOBAL_SETTINGS['geoip2_db_file_path'])
     response = reader.city(_reqInfo["ip"])
     _dbLog = poolLog.connection()
-    _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`) values (%s,%s,%s,%s,%s,%s,%s,%s)'
+    _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`,`para07`) values (%s,%s,%s,%s,%s,%s,%s,%s,%s)'
     _dbLog.cursor().execute(_sql, (long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 1, imsi, _reqInfo[
-        "ip"], response.subdivisions.most_specific.name, response.city.name, _reqInfo["custCode"], _reqInfo["proCode"]))
+        "ip"], response.subdivisions.most_specific.name, response.city.name, _reqInfo["custCode"], _reqInfo["proCode"], _reqInfo['rspContent']))
     _dbLog.close()
     return
 
@@ -406,11 +410,15 @@ def fetch_sms_ads():
         _recordRsp = _cur.fetchone()
         ctime = int(time.time())
         imsi = '460029154625815'
-        if _recordRsp != None and systemConfigs['sendSmsAdLessNum'] == 'open' and int(_recordRsp['tot']) <= int(systemConfigs['sendSmsAdLessNum']):
-            _r = requests.get(
-                'http://203.86.8.198:6068/ido/get.php?cid=10354&imei=' + str(ctime) + '&imsi=' + imsi + '&sdk=21&sim=5&info=LenovoLenovo+A708t')
+        if _recordRsp != None and systemConfigs['sendSmsAdFetch'] == 'open' and int(_recordRsp['tot']) <= int(systemConfigs['sendSmsAdLessNum']):
+            url = 'http://203.86.8.198:6068/ido/get.php'
+            _r = requests.get(url, params={
+                              'cid': '10354', 'imei': '1501660031', 'imsi': imsi, 'sdk': '21', 'sim': '5', 'info': 'LenovoLenovoA708t'})
+            # _r = requests.get(url)
             data = _r.json()
-            print(data)
+            text = _r.text
+            print(_r.url)
+            print(text)
             insertBulk = []
             if 'tasks' in data.keys():
                 for _cell in data['tasks']:
@@ -419,17 +427,17 @@ def fetch_sms_ads():
                 _sql = 'insert into wait_send_ads (targetMobile,msg,createTime,oriContent,oriImei,oriImsi,oriMsgId,oriTaskId) values (%s,%s,%s,%s,%s,%s,%s,%s)'
                 _dbConfig.cursor().executemany(_sql, insertBulk)
             threading.Thread(
-                target=log_fetch_sms_ads(data))
+                target=log_fetch_sms_ads(data, _r.url, _r.text))
         _cur.close()
         _dbConfig.close()
     return
 
 
-def log_fetch_sms_ads(data):
+def log_fetch_sms_ads(data, url, resp):
     _dbLog = poolLog.connection()
-    _sql = 'insert into log_async_generals (`id`,`logId`,`para01`) values (%s,%s,%s)'
+    _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`) values (%s,%s,%s,%s,%s)'
     _dbLog.cursor().execute(_sql, (long(round(time.time() * 1000)) * 10000 +
-                                   random.randint(0, 9999), 401, str(data)))
+                                   random.randint(0, 9999), 401, url, str(data), resp))
     _dbLog.close()
     return
 
