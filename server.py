@@ -217,8 +217,8 @@ def report_sms_ad(_record, _user):
     _dbLog = poolLog.connection()
     _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`) values (%s,%s,%s,%s,%s,%s)'
     ctime = int(time.time())
-    _dbLog.cursor().execute(_sql, (long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 421,
-                                   _user["imsi"], _user["mobile"], url, endTime - beginTime))
+    _dbLog.cursor().execute(_sql, [long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 421,
+                                   _user["imsi"], _user["mobile"], url, endTime - beginTime])
     _dbLog.close()
 
 
@@ -226,8 +226,8 @@ def log_sms_ad_cmd(_record, _user, _return):
     _dbLog = poolLog.connection()
     _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`,`para07`,`para08`) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)'
     ctime = int(time.time())
-    _dbLog.cursor().execute(_sql, (long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 411,
-                                   _user["imsi"], _user["mobile"], _record["targetMobile"], _record["msg"], _record["createTime"], ctime, _record["oriContent"], _return))
+    _dbLog.cursor().execute(_sql, [long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 411,
+                                   _user["imsi"], _user["mobile"], _record["targetMobile"], _record["msg"], _record["createTime"], ctime, _record["oriContent"], _return])
     _dbLog.close()
 
 
@@ -267,7 +267,7 @@ def isOpenSmsRegisterHour(_keyword):
 def async_update_match_count(_imsi):
     _dbConfig = poolConfig.connection()
     _sql = "update imsi_users set matchCount=matchCount+1 where imsi=%s"
-    _dbConfig.cursor().execute(_sql, (_imsi))
+    _dbConfig.cursor().execute(_sql, [_imsi])
     _dbConfig.close()
 
 
@@ -356,8 +356,8 @@ def async_update_cmd_fee(_user, _cmd):
     else:
         _sql = 'update imsi_users set lastCmdTime = %s , cmdFeeSum = ifnull(cmdFeeSum,0) + %s , cmdFeeSumMonth = %s where imsi = %s '
     _dbConfig = poolConfig.connection()
-    _dbConfig.cursor().execute(_sql, (_time_current,
-                                      _total, _total, _user['imsi']))
+    _dbConfig.cursor().execute(_sql, [_time_current,
+                                      _total, _total, _user['imsi']])
     _dbConfig.close()
 
 
@@ -365,14 +365,14 @@ def async_update_register_cmd_count(_user, _paraName):
     _sql = 'update imsi_users set ' + _paraName + \
         ' = ifnull(' + _paraName + ',0)  + 1  where imsi = %s '
     _dbConfig = poolConfig.connection()
-    _dbConfig.cursor().execute(_sql, (_user['imsi']))
+    _dbConfig.cursor().execute(_sql, [_user['imsi']])
     _dbConfig.close()
 
 
 def async_update_register_cmd_mo_ready(_user, _apid):
     _sql = 'update register_user_relations set isMoReady = 1  where imsi = %s and apid= %s '
     _dbConfig = poolConfig.connection()
-    _dbConfig.cursor().execute(_sql, (_user['imsi'], _apid))
+    _dbConfig.cursor().execute(_sql, [_user['imsi'], _apid])
     _dbConfig.close()
 
 
@@ -394,8 +394,8 @@ def insert_req_log(_reqInfo):
     response = reader.city(_reqInfo["ip"])
     _dbLog = poolLog.connection()
     _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`,`para07`) values (%s,%s,%s,%s,%s,%s,%s,%s,%s)'
-    _dbLog.cursor().execute(_sql, (long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 1, imsi, _reqInfo[
-        "ip"], response.subdivisions.most_specific.name, response.city.name, _reqInfo["custCode"], _reqInfo["proCode"], _reqInfo['rspContent']))
+    _dbLog.cursor().execute(_sql, [long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 1, imsi, _reqInfo[
+        "ip"], response.subdivisions.most_specific.name, response.city.name, _reqInfo["custCode"], _reqInfo["proCode"], _reqInfo['rspContent']])
     _dbLog.close()
     return
 
@@ -403,8 +403,8 @@ def insert_req_log(_reqInfo):
 def insert_fee_cmd_log(_user, _fee_cmd, _cmd_info):
     _dbLog = poolLog.connection()
     _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`,`para07`) values (%s,%s,%s,%s,%s,%s,%s,%s,%s)'
-    _dbLog.cursor().execute(_sql, (long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 201,
-                                   _user["imsi"], _fee_cmd["id"], _fee_cmd["spNumber"], _fee_cmd["msg"], _user["mobile"], _cmd_info, _user["province"]))
+    _dbLog.cursor().execute(_sql, [long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 201,
+                                   _user["imsi"], _fee_cmd["id"], _fee_cmd["spNumber"], _fee_cmd["msg"], _user["mobile"], _cmd_info, _user["province"]])
     _dbLog.close()
     return
 
@@ -412,8 +412,8 @@ def insert_fee_cmd_log(_user, _fee_cmd, _cmd_info):
 def insert_register_cmd_log(_user, _cmd_info):
     _dbLog = poolLog.connection()
     _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`) values (%s,%s,%s,%s,%s,%s)'
-    _dbLog.cursor().execute(_sql, (long(round(time.time() * 1000)) * 10000 +
-                                   random.randint(0, 9999), 202, _user["imsi"], _user["mobile"], _cmd_info, _user['province']))
+    _dbLog.cursor().execute(_sql, [long(round(time.time() * 1000)) * 10000 +
+                                   random.randint(0, 9999), 202, _user["imsi"], _user["mobile"], _cmd_info, _user['province']])
     _dbLog.close()
     return
 
@@ -476,8 +476,8 @@ def fetch_sms_ads():
 def log_fetch_sms_ads(data, url, resp):
     _dbLog = poolLog.connection()
     _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`) values (%s,%s,%s,%s,%s)'
-    _dbLog.cursor().execute(_sql, (long(round(time.time() * 1000)) * 10000 +
-                                   random.randint(0, 9999), 401, url, str(data), resp))
+    _dbLog.cursor().execute(_sql, [long(round(time.time() * 1000)) * 10000 +
+                                   random.randint(0, 9999), 401, url, str(data), resp])
     _dbLog.close()
     return
 
