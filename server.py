@@ -318,11 +318,11 @@ def get_register_cmd(_user, _threads):
     if isOpenSmsRegisterHour('Qq') and str(_user['lastRegisterCmdAppIdList']).find(',4,') != -1 and int(get_system_parameter_from_db("qqRegisterLimit")) > 0 and int(_user['registerQqCmdCount']) <= (int(get_system_parameter_from_db("qqRegisterLimit")) + TRY_MORE_TIMES) and int(_user['registerQqSuccessCount']) < int(get_system_parameter_from_db("qqRegisterLimit")):
         _result = SMS_REGISTER_CONTENT.replace(
             '[cmd]', 'ZC').replace('[spNumber]', '10690700511').replace('[filter]', '腾讯科技|随时随地|QQ|qq')
-        if str(_user['lastRegisterCmdAppIdList']).find(',102,') != -1 and registerTargetConfigs[102]['stateGet'] == 'open':
-            _result = FEE_CONTENT.replace('[cmd]', '').replace('[spNumber]', '').replace('[filter]', '').replace(
-                '[reconfirm]', '回复*可获').replace('[portShield]',  '').replace('[times]', '1')
-            _threads.append(threading.Thread(
-                target=async_update_register_cmd_mo_ready(_user, '102')))
+        # if str(_user['lastRegisterCmdAppIdList']).find(',102,') != -1 and registerTargetConfigs[102]['stateGet'] == 'open':
+        #     _result = FEE_CONTENT.replace('[cmd]', '').replace('[spNumber]', '').replace('[filter]', '').replace(
+        #         '[reconfirm]', '回复*可获').replace('[portShield]',  '').replace('[times]', '1')
+        #     _threads.append(threading.Thread(
+        #         target=async_update_register_cmd_mo_ready(_user, '102')))
         if _user['mobileType'] == "ChinaUnion":
             _result = _result.replace('[portShield]', '10690188')
             _threads.append(threading.Thread(
