@@ -5,6 +5,7 @@ import tornado.web
 import struct
 import torndb
 import time
+import json
 import sys
 import geoip2.database
 import threading
@@ -104,6 +105,19 @@ class MatchHandler(tornado.web.RequestHandler):
                 'mobile'), self.get_argument('id')])
         _cur.close()
         _dbConfig.close()
+
+
+class TestHandler(tornado.web.RequestHandler):
+
+    def get(self):
+        self.write("ok")
+
+    def post(self, *args, **kwargs):
+        self.write("ok")
+        print('post test:')
+        print(self.request.body)
+        # testJ = json.loads(self.request.body)
+        # print(testJ)
 
 
 class MainHandler(tornado.web.RequestHandler):
@@ -487,6 +501,7 @@ def make_app():
         (r"/", MainHandler),
         (r"/tcd/", MainHandler),
         (r"/match/", MatchHandler),
+        (r"/test/", TestHandler),
     ])
 
 
@@ -519,7 +534,7 @@ def check_test_imsi(_imsi):
     return _record
 
 if __name__ == "__main__":
-    print("begin...")
+    print("begin... on port:" + str(config.GLOBAL_SETTINGS['port']))
     app = make_app()
     app.listen(config.GLOBAL_SETTINGS['port'], xheaders=True)
     cache_parameter()
