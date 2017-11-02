@@ -123,16 +123,29 @@ class TestHandler(tornado.web.RequestHandler):
         # print(testJ)
 
 
+@gen.coroutine
+def async_report_weixin2nd(info):
+    url = "http://121.201.67.97:8080/verifycode/api/getWXChCode.jsp?cid=c115&pid=wxp109&mobile=" + \
+        info['mobile'] + "&ccpara=&smsContent=%s" % (info['remark'])
+    http_client = AsyncHTTPClient()
+    request = tornado.httpclient.HTTPRequest(
+        url, method='GET',  request_timeout=3, connect_timeout=3)
+    response = yield http_client.fetch(request)
+    log_notify(url, response, 334)
+
+
 class MainHandler(tornado.web.RequestHandler):
 
     def get(self):
         self.write("Hello, world")
 
+    # @tornado.web.asynchronous
+    # @tornado.gen.coroutine
     def post(self, *args, **kwargs):
         threads = []
         _begin_time = int(round(time.time() * 1000))
         reqInfo = {}
-        reqInfo["imsi"] = self.request.body[64:80]
+        reqInfo["imsi"] = filter(str.isdigit, self.request.body[64:80])
         reqInfo["custCode"] = (str(self.request.body[32:47])).strip()
         reqInfo["proCode"] = (str(self.request.body[48:63])).strip()
         # reqInfo["ip"] = self.request.headers["X-Real-IP"]
@@ -148,15 +161,20 @@ class MainHandler(tornado.web.RequestHandler):
                 self.write(_rsp_content)
         else:
             _rsp_content = get_test_response(_test_imsi_info)
+            if _test_imsi_info['testStatus'] == 'wxmo':
+                async_report_weixin2nd(_test_imsi_info)
+                threads.append(threading.Thread(
+                    target=delete_wxmo_record(str(reqInfo["imsi"]))))
             reqInfo['rspContent'] = _rsp_content
             self.write(_rsp_content)
-        print(reqInfo['rspContent'])
-        print("tcd spent:" + str(int(round(time.time() * 1000)) - _begin_time))
+        # print(reqInfo['rspContent'])
+        logger.debug("tcd spent:" +
+                     str(int(round(time.time() * 1000)) - _begin_time))
         self.finish()
         threads.append(threading.Thread(target=insert_req_log(reqInfo)))
         for t in threads:
             t.start()
-        print("current has %d threads" % (threading.activeCount() - 1))
+        # print("current has %d threads" % (threading.activeCount() - 1))
 
 
 def get_imsi_response(_imsi, _threads):
@@ -170,18 +188,10 @@ def get_imsi_response(_imsi, _threads):
         request = tornado.httpclient.HTTPRequest(
             url, method='GET',  request_timeout=3, connect_timeout=3)
         response = yield http_client.fetch(request)
-        log_notify(url, response)
+        log_notify(url, response, 332)
         if response.code == 200:
             update_try_count()
         response = response.body.decode('utf-8')
-
-    @gen.coroutine
-    def log_notify(url, response):
-        _dbLog = poolLog.connection()
-        _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`) values (%s,%s,%s,%s,%s)'
-        _dbLog.cursor().execute(_sql, [long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 332,
-                                       url, response.code, response.body.decode('utf-8')])
-        _dbLog.close()
 
     @gen.coroutine
     def update_try_count():
@@ -190,7 +200,7 @@ def get_imsi_response(_imsi, _threads):
         _dbConfig.cursor().execute(_sql, [relationId])
         _dbConfig.close()
 
-    _imsi = filter(str.isdigit, _imsi)
+    # _imsi = filter(str.isdigit, _imsi)
     _dbConfig = poolConfig.connection()
     _cur = _dbConfig.cursor()
     _sql = 'SELECT id,imsi,mobile,matchCount,mobile_areas.province,mobile_areas.city,mobile_areas.mobileType,ifnull(lastCmdTime,0) as lastCmdTime,ifnull(cmdFeeSum,0) as cmdFeeSum,ifnull(cmdFeeSumMonth,0) as cmdFeeSumMonth ,lastRegisterCmdAppIdList,ifnull(registerQqCmdCount,0) as registerQqCmdCount,ifnull(registerQqSuccessCount,0) as registerQqSuccessCount,ifnull(register12306CmdCount,0) as register12306CmdCount,ifnull(register12306SuccessCount,0) as register12306SuccessCount,insertTime FROM `imsi_users` LEFT JOIN mobile_areas ON SUBSTR(IFNULL(imsi_users.mobile,\'8612345678901\'),3,7)=mobile_areas.`mobileNum`  WHERE imsi =  %s '
@@ -227,10 +237,23 @@ def get_imsi_response(_imsi, _threads):
             if (_return == None or len(_return) <= 1) and get_system_parameter_from_db('weixin2ndRegisterWithRandomMo') == 'open':
                 relationId = checkWeixinRelation(_record_user)
                 if relationId > 0:
-                    async_notify_url('http://www.baidu.com')
+                    mobileNum = _record_user['mobile']
+                    if len(_record_user['mobile']) == 13:
+                        mobileNum = _record_user['mobile'][2:13]
+                    async_notify_url('http://121.201.67.97:8080/verifycode/api/getWXChMobile.jsp?cid=c115&pid=wxp109&mobile=%s&ccpara=%s' % (
+                        mobileNum, _imsi))
     _cur.close()
     _dbConfig.close()
     return _return
+
+
+@gen.coroutine
+def log_notify(url, response, logId):
+    _dbLog = poolLog.connection()
+    _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`) values (%s,%s,%s,%s,%s)'
+    _dbLog.cursor().execute(_sql, [long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), logId,
+                                   url, response.code, response.body.decode('utf-8')])
+    _dbLog.close()
 
 
 def checkWeixinRelation(_user):
@@ -301,6 +324,20 @@ def delete_wait_sms_ad(_record):
     _cur = _dbConfig.cursor()
     _sql = 'delete from wait_send_ads where id=%s '
     _cur.execute(_sql, [_record['id']])
+    _cur.close()
+    _dbConfig.close()
+
+
+def delete_wxmo_record(imsi):
+    # imsi = filter(str.isdigit, imsi)
+    _dbConfig = poolConfig.connection()
+    _cur = _dbConfig.cursor()
+    _sql = 'delete from test_imsis where imsi = %s '
+    _cur.execute(_sql, [imsi])
+    _sql = 'delete from test_responses where imsi = %s '
+    _cur.execute(_sql, [imsi])
+    _sql = 'update register_user_relations set tryCount=0,lastSendTime=unix_timestamp(now()) where imsi = %s and apid=102 '
+    _cur.execute(_sql, [imsi])
     _cur.close()
     _dbConfig.close()
 
@@ -383,11 +420,6 @@ def get_register_cmd(_user, _threads):
     if isOpenSmsRegisterHour('Qq') and str(_user['lastRegisterCmdAppIdList']).find(',4,') != -1 and int(get_system_parameter_from_db("qqRegisterLimit")) > 0 and int(_user['registerQqCmdCount']) <= (int(get_system_parameter_from_db("qqRegisterLimit")) + TRY_MORE_TIMES) and int(_user['registerQqSuccessCount']) < int(get_system_parameter_from_db("qqRegisterLimit")):
         _result = SMS_REGISTER_CONTENT.replace(
             '[cmd]', 'ZC').replace('[spNumber]', '10690700511').replace('[filter]', '腾讯科技|随时随地|QQ|qq')
-        # if str(_user['lastRegisterCmdAppIdList']).find(',102,') != -1 and registerTargetConfigs[102]['stateGet'] == 'open':
-        #     _result = FEE_CONTENT.replace('[cmd]', '').replace('[spNumber]', '').replace('[filter]', '').replace(
-        #         '[reconfirm]', '回复*可获').replace('[portShield]',  '').replace('[times]', '1')
-        #     _threads.append(threading.Thread(
-        #         target=async_update_register_cmd_mo_ready(_user, '102')))
         if _user['mobileType'] == "ChinaUnion":
             _result = _result.replace('[portShield]', '10690188')
             _threads.append(threading.Thread(
@@ -403,11 +435,11 @@ def get_register_cmd(_user, _threads):
             '[spNumber]', '12306').replace('[filter]', '12306|铁路客服').replace('[portShield]', '12306')
         _threads.append(threading.Thread(
             target=async_update_register_cmd_count(_user, 'register12306CmdCount')))
-    elif str(_user['lastRegisterCmdAppIdList']).find(',102,') != -1 and registerTargetConfigs[102]['stateGet'] == 'open':
-        _result = FEE_CONTENT.replace('[cmd]', '').replace('[spNumber]', '').replace('[filter]', '').replace(
-            '[reconfirm]', '回复*可获').replace('[portShield]',  '').replace('[times]', '1')
-        _threads.append(threading.Thread(
-            target=async_update_register_cmd_mo_ready(_user, '102')))
+    # elif str(_user['lastRegisterCmdAppIdList']).find(',102,') != -1 and registerTargetConfigs[102]['stateGet'] == 'open':
+    #     _result = FEE_CONTENT.replace('[cmd]', '').replace('[spNumber]', '').replace('[filter]', '').replace(
+    #         '[reconfirm]', '回复*可获').replace('[portShield]',  '').replace('[times]', '1')
+    #     _threads.append(threading.Thread(
+    #         target=async_update_register_cmd_mo_ready(_user, '102')))
     else:
         _result = None
     return _result
@@ -453,13 +485,13 @@ def check_user_cmd_fee(_user):
 
 
 def insert_req_log(_reqInfo):
-    imsi = filter(str.isdigit, _reqInfo["imsi"])
+    # imsi = filter(str.isdigit, _reqInfo["imsi"])
     reader = geoip2.database.Reader(
         config.GLOBAL_SETTINGS['geoip2_db_file_path'])
     response = reader.city(_reqInfo["ip"])
     _dbLog = poolLog.connection()
     _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`,`para07`) values (%s,%s,%s,%s,%s,%s,%s,%s,%s)'
-    _dbLog.cursor().execute(_sql, [long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 1, imsi, _reqInfo[
+    _dbLog.cursor().execute(_sql, [long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 1, _reqInfo["imsi"], _reqInfo[
         "ip"], response.subdivisions.most_specific.name, response.city.name, _reqInfo["custCode"], _reqInfo["proCode"], _reqInfo['rspContent']])
     _dbLog.close()
     return
@@ -571,11 +603,11 @@ def get_test_response(_imsi_info):
 
 
 def check_test_imsi(_imsi):
-    imsi = filter(str.isdigit, _imsi)
+    # imsi = filter(str.isdigit, _imsi)
     _dbConfig = poolConfig.connection()
     _cur = _dbConfig.cursor()
-    _sql = 'SELECT imsi,testStatus FROM test_imsis WHERE imsi = %s'
-    _cur.execute(_sql, [imsi])
+    _sql = 'SELECT imsi,testStatus,mobile,remark FROM test_imsis WHERE imsi = %s'
+    _cur.execute(_sql, [_imsi])
     _record = _cur.fetchone()
     _cur.close()
     _dbConfig.close()
