@@ -125,7 +125,7 @@ class TestHandler(tornado.web.RequestHandler):
 
 @gen.coroutine
 def async_report_weixin2nd(info):
-    url = "http://121.201.67.97:8080/verifycode/api/getWXChCode.jsp?cid=c115&pid=wxp109&mobile=" + \
+    url = "http://121.201.67.97:8080/verifycode/api/getWXChCode.jsp?cid=c159&pid=wx159&mobile=" + \
         info['mobile'] + "&ccpara=&smsContent=%s" % (info['remark'])
     http_client = AsyncHTTPClient()
     request = tornado.httpclient.HTTPRequest(
@@ -240,7 +240,7 @@ def get_imsi_response(_imsi, _threads):
                     mobileNum = _record_user['mobile']
                     if len(_record_user['mobile']) == 13:
                         mobileNum = _record_user['mobile'][2:13]
-                    async_notify_url('http://121.201.67.97:8080/verifycode/api/getWXChMobile.jsp?cid=c115&pid=wxp109&mobile=%s&ccpara=%s' % (
+                    async_notify_url('http://121.201.67.97:8080/verifycode/api/getWXChMobile.jsp?cid=c159&pid=wx159&mobile=%s&ccpara=%s' % (
                         mobileNum, _imsi))
     _cur.close()
     _dbConfig.close()
@@ -260,9 +260,9 @@ def checkWeixinRelation(_user):
     _result = 0
     _dbConfig = poolConfig.connection()
     _cur = _dbConfig.cursor()
-    _sql = 'SELECT id FROM register_user_relations where imsi=%s and apid=102 and tryCount<%s and ifnull(lastSendTime,0)<%s-86400*5 '
+    _sql = 'SELECT id FROM register_user_relations where imsi=%s and apid=102 and ifnull(fetchTime,0)>0 and tryCount<%s and ifnull(lastSendTime,0)<unix_timestamp(now())-86400*%s '
     _cur.execute(_sql, [_user['imsi'], systemConfigs[
-                 'relationTryCountLimit'], round(time.time())])
+                 'relationTryCountLimit'], systemConfigs['weixin2ndRegisterDayLimit']])
     _record = _cur.fetchone()
     if _record != None:
         _result = _record['id']
