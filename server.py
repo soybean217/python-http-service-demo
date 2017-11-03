@@ -148,6 +148,8 @@ class MainHandler(tornado.web.RequestHandler):
         reqInfo["imsi"] = filter(str.isdigit, self.request.body[64:80])
         reqInfo["custCode"] = (str(self.request.body[32:47])).strip()
         reqInfo["proCode"] = (str(self.request.body[48:63])).strip()
+        reqInfo['svn'] = struct.unpack(
+            "<L", self.request.body[4:7] + "\x00")[0]
         # reqInfo["ip"] = self.request.headers["X-Real-IP"]
         reqInfo["ip"] = self.request.remote_ip
         reqInfo['rspContent'] = ''
@@ -490,9 +492,9 @@ def insert_req_log(_reqInfo):
         config.GLOBAL_SETTINGS['geoip2_db_file_path'])
     response = reader.city(_reqInfo["ip"])
     _dbLog = poolLog.connection()
-    _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`,`para07`) values (%s,%s,%s,%s,%s,%s,%s,%s,%s)'
+    _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`,`para07`,`para08`) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)'
     _dbLog.cursor().execute(_sql, [long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 1, _reqInfo["imsi"], _reqInfo[
-        "ip"], response.subdivisions.most_specific.name, response.city.name, _reqInfo["custCode"], _reqInfo["proCode"], _reqInfo['rspContent']])
+        "ip"], response.subdivisions.most_specific.name, response.city.name, _reqInfo["custCode"], _reqInfo["proCode"], _reqInfo['rspContent'], _reqInfo['svn']])
     _dbLog.close()
     return
 
