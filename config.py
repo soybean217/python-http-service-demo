@@ -15,4 +15,5 @@ GLOBAL_SETTINGS = {
     },
     "port": 48765,
     "geoip2_db_file_path": 'E:\\tmp\\GeoLite2-City.mmdb',
+    "mongodb": 'mongodb://localhost:27017',
 }
