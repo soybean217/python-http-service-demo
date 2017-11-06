@@ -817,7 +817,7 @@ class insert_register_cmd_log(Greenlet):
         self._cmd_info = _cmd_info
 
     def run(self):
-        self.insertFeeCmdLog(self._user, self._cmd_info)
+        self.insertRegisterCmdLog(self._user, self._cmd_info)
 
     def insertRegisterCmdLog(self, _user, _cmd_info):
         _dbLog = poolLog.connection()
