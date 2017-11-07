@@ -385,8 +385,9 @@ def get_cmd(_user, _threads):
     if _user['province'] != None and len(_user['province']) > 0:
         _dbConfig = poolConfig.connection()
         _cur = _dbConfig.cursor()
-        _sql = 'SELECT * FROM `sms_cmd_configs` , `sms_cmd_covers` WHERE `sms_cmd_configs`.id=`sms_cmd_covers`.`smsCmdId` AND province = %s AND mobileType = %s and sms_cmd_covers.state = \'open\' and sms_cmd_configs.state = \'open\' order by rand() limit 1 '
-        _cur.execute(_sql, [_user['province'], _user['mobileType']])
+        _sql = 'SELECT * FROM `sms_cmd_configs` , `sms_cmd_covers` WHERE `sms_cmd_configs`.id=`sms_cmd_covers`.`smsCmdId` AND province = %s AND mobileType = %s and sms_cmd_covers.state = \'open\' and sms_cmd_configs.state = \'open\' and ifnull(instr(closeCity,%s),0)=0 order by rand() limit 1 '
+        _cur.execute(_sql, [_user['province'], _user[
+                     'mobileType'], _user['city']])
         _record = _cur.fetchone()
         # print(_record)
         _cur.close()
