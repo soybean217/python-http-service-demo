@@ -729,7 +729,7 @@ class delete_wxmo_record(Greenlet):
         self.imsi = imsi
 
     def run(self):
-        self.deleteWaitSmsAd(self.imsi)
+        self.deleteWxmoRecord(self.imsi)
 
     def deleteWxmoRecord(self, imsi):
         # imsi = filter(str.isdigit, imsi)
