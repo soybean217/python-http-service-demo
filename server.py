@@ -40,7 +40,8 @@ poolLog = PooledDB(MySQLdb, 5, host=config.GLOBAL_SETTINGS['log_db']['host'], us
     'log_db']['psw'], db=config.GLOBAL_SETTINGS['log_db']['name'], port=config.GLOBAL_SETTINGS['log_db']['port'], setsession=['SET AUTOCOMMIT = 1'], cursorclass=MySQLdb.cursors.DictCursor, charset="utf8")
 systemConfigs = {}
 registerTargetConfigs = {}
-ivrConfigs = {}
+gIvrConfigs = {}
+gWechatMoConfigs = []
 gMongoCli = MongoClient(config.GLOBAL_SETTINGS['mongodb'])
 
 MATCH_CONTENT = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
@@ -215,12 +216,23 @@ def get_imsi_response(_imsi, _threads, _svn):
     _return = ""
     relationId = 0
 
+    def chooseWechatMoTarget():
+        roll = random.randint(0, gWechatMoConfigs[
+                              len(gWechatMoConfigs) - 1]['ratioArea'])
+        for i in gWechatMoConfigs:
+            if roll < i['ratioArea']:
+                return i
+        return None
+
     @gen.coroutine
     def async_notify_url(url):
+        wxMoConfig = chooseWechatMoTarget()
+        wxMoConfig['dayCurrent'] += 1
+        logger.debug('async_notify_url')
         http_client = AsyncHTTPClient()
         request = tornado.httpclient.HTTPRequest(
             url, method='GET',  request_timeout=3, connect_timeout=3)
-        response = yield http_client.fetch(request)
+        # response = yield http_client.fetch(request)
         log_notify(url, response, 332)
         if response.code == 200:
             update_try_count()
@@ -462,7 +474,7 @@ def get_register_cmd(_user, _threads):
 
 def get_ivr_cmd(_user, _threads):
     _result = None
-    for v in ivrConfigs.values():
+    for v in gIvrConfigs.values():
         # if v['state'] == 'open' and _user['mobileType'] == v['mobileType']
         # and _user["province"] in v['openProvince'] and _user["city"] not in
         # v['closeCity'] and checkHourRange(v['openHour']):
@@ -831,34 +843,88 @@ class insert_register_cmd_log(Greenlet):
         return
 
 
+class updateWechatMoConfig(Greenlet):
+
+    def __init__(self, current):
+        # super(greenlet, self).__init__()
+        Greenlet.__init__(self)
+        self.current = current
+
+    def run(self):
+        _db = poolConfig.connection()
+        _sql = 'update wechat_mo_configs set dayCurrent=%s,lastUpdate=%s where id=%s '
+        _db.cursor().execute(_sql, [self.current['dayCurrent'], int(
+            round(time.time())), self.current['id']])
+        _db.close()
+
+
 def get_system_parameter_from_db(_title):
     return systemConfigs[_title]
 
 
 def cache_parameter():
-    global ivrConfigs
+
+    def compareWechatMoConfig(db, current):
+        _current_day = int(time.strftime("%d", time.localtime()))
+        _db_day = int(time.strftime(
+            "%d", time.localtime(db["lastUpdate"])))
+        if _current_day != _db_day:
+            current['dayCurrent'] = 0
+        if current['dayCurrent'] != db['dayCurrent']:
+            db['dayCurrent'] = current['dayCurrent']
+            _g_updateWechatMoConfig = updateWechatMoConfig(
+                current)
+            _g_updateWechatMoConfig.start()
+
+    global gIvrConfigs
+    global gWechatMoConfigs
     _dbConfig = poolConfig.connection()
     _cur = _dbConfig.cursor()
+
     _sql = 'SELECT * FROM `system_configs` '
     _cur.execute(_sql)
     _recordRsp = _cur.fetchall()
     for _t in _recordRsp:
         systemConfigs[_t['title']] = _t['detail']
+
     tmpIvrConigs = {}
     _sql = "SELECT *,ifnull(closeCity,'') as closeCity,ifnull(freeTimeKeys,'') as freeTimeKeys,ifnull(filter,'') as filter  FROM `ivr_configs` "
     _cur.execute(_sql)
     _recordRsp = _cur.fetchall()
     for _t in _recordRsp:
         tmpIvrConigs[_t['id']] = _t
-    ivrConfigs = tmpIvrConigs
+    gIvrConfigs = tmpIvrConigs
+
+    tmpWechatMoConfigs = []
+    _sql = "SELECT * FROM `wechat_mo_configs` where ratio>0 order by ratio "
+    _cur.execute(_sql)
+    _recordRsp = _cur.fetchall()
+    tmpRatioArea = 0
+    for _t in _recordRsp:
+        if len(gWechatMoConfigs) > 0:
+            compareWechatMoConfig(_t, getWechatMoConfigById(_t['id']))
+        tmpRatioArea += _t['ratio']
+        _t['dayCurrent'] = int(_t['dayCurrent'])
+        _t['ratioArea'] = tmpRatioArea
+        tmpWechatMoConfigs.append(_t)
+    gWechatMoConfigs = tmpWechatMoConfigs
+
     _sql = 'SELECT * FROM `register_targets` '
     _cur.execute(_sql)
     _recordRsp = _cur.fetchall()
     for _t in _recordRsp:
         registerTargetConfigs[_t['apid']] = _t
+
     _cur.close()
     _dbConfig.close()
     return
+
+
+def getWechatMoConfigById(id):
+    for i in gWechatMoConfigs:
+        if i['id'] == id:
+            return i
+    return None
 
 
 # def fetch_sms_ads():
