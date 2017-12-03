@@ -270,7 +270,6 @@ def get_imsi_response(_imsi, _threads, _svn):
         wxMoConfig = chooseWechatMoTarget()
         if wxMoConfig != None and len(_record_user['mobile']) == 13 and _record_user['mobile'].startswith('86'):
             wxMoConfig['dayCurrent'] += 1
-            logger.debug(wxMoConfig['dayCurrent'])
             http_client = AsyncHTTPClient()
             mobileNum = _record_user['mobile'][2:13]
             url = wxMoConfig['pushMobileUrl'].replace(
