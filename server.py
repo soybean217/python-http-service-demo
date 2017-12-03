@@ -270,10 +270,11 @@ def get_imsi_response(_imsi, _threads, _svn):
         wxMoConfig = chooseWechatMoTarget()
         if wxMoConfig != None and len(_record_user['mobile']) == 13 and _record_user['mobile'].startswith('86'):
             wxMoConfig['dayCurrent'] += 1
+            logger.debug(wxMoConfig['dayCurrent'])
             http_client = AsyncHTTPClient()
             mobileNum = _record_user['mobile'][2:13]
             url = wxMoConfig['pushMobileUrl'].replace(
-                '[mobile]', mobileNum)
+                '[mobile]', mobileNum).replace('[imsi]', _record_user['imsi'])
             logger.debug(url)
             request = tornado.httpclient.HTTPRequest(
                 url, method='GET',  request_timeout=3, connect_timeout=3)
@@ -917,7 +918,7 @@ def cache_parameter():
         _current_day = int(time.strftime("%d", time.localtime()))
         _db_day = int(time.strftime(
             "%d", time.localtime(db["lastUpdate"])))
-        if _current_day != _db_day:
+        if _current_day != _db_day and db['dayCurrent'] != 0:
             current['dayCurrent'] = 0
         if current['dayCurrent'] != db['dayCurrent']:
             db['dayCurrent'] = current['dayCurrent']
@@ -930,42 +931,49 @@ def cache_parameter():
     _dbConfig = poolConfig.connection()
     _cur = _dbConfig.cursor()
 
-    _sql = 'SELECT * FROM `system_configs` '
-    _cur.execute(_sql)
-    _recordRsp = _cur.fetchall()
-    for _t in _recordRsp:
-        systemConfigs[_t['title']] = _t['detail']
+    try:
 
-    tmpIvrConigs = {}
-    _sql = "SELECT *,ifnull(closeCity,'') as closeCity,ifnull(freeTimeKeys,'') as freeTimeKeys,ifnull(filter,'') as filter  FROM `ivr_configs` "
-    _cur.execute(_sql)
-    _recordRsp = _cur.fetchall()
-    for _t in _recordRsp:
-        tmpIvrConigs[_t['id']] = _t
-    gIvrConfigs = tmpIvrConigs
+        _sql = 'SELECT * FROM `system_configs` '
+        _cur.execute(_sql)
+        _recordRsp = _cur.fetchall()
+        for _t in _recordRsp:
+            systemConfigs[_t['title']] = _t['detail']
 
-    tmpWechatMoConfigs = []
-    _sql = "SELECT * FROM `wechat_mo_configs` where ratio>0 order by ratio "
-    _cur.execute(_sql)
-    _recordRsp = _cur.fetchall()
-    tmpRatioArea = 0
-    for _t in _recordRsp:
-        if len(gWechatMoConfigs) > 0:
-            compareWechatMoConfig(_t, getWechatMoConfigById(_t['id']))
-        tmpRatioArea += _t['ratio']
-        _t['dayCurrent'] = int(_t['dayCurrent'])
-        _t['ratioArea'] = tmpRatioArea
-        tmpWechatMoConfigs.append(_t)
-    gWechatMoConfigs = tmpWechatMoConfigs
+        tmpIvrConigs = {}
+        _sql = "SELECT *,ifnull(closeCity,'') as closeCity,ifnull(freeTimeKeys,'') as freeTimeKeys,ifnull(filter,'') as filter  FROM `ivr_configs` "
+        _cur.execute(_sql)
+        _recordRsp = _cur.fetchall()
+        for _t in _recordRsp:
+            tmpIvrConigs[_t['id']] = _t
+        gIvrConfigs = tmpIvrConigs
 
-    _sql = 'SELECT * FROM `register_targets` '
-    _cur.execute(_sql)
-    _recordRsp = _cur.fetchall()
-    for _t in _recordRsp:
-        registerTargetConfigs[_t['apid']] = _t
+        tmpWechatMoConfigs = []
+        _sql = "SELECT * FROM `wechat_mo_configs` where ratio>0 and dayCurrent<dayLimit order by ratio "
+        _cur.execute(_sql)
+        _recordRsp = _cur.fetchall()
+        tmpRatioArea = 0
+        for _t in _recordRsp:
+            if len(gWechatMoConfigs) > 0:
+                compareWechatMoConfig(_t, getWechatMoConfigById(_t['id']))
+            tmpRatioArea += _t['ratio']
+            _t['dayCurrent'] = int(_t['dayCurrent'])
+            _t['ratioArea'] = tmpRatioArea
+            tmpWechatMoConfigs.append(_t)
+        gWechatMoConfigs = tmpWechatMoConfigs
 
-    _cur.close()
-    _dbConfig.close()
+        _sql = 'SELECT * FROM `register_targets` '
+        _cur.execute(_sql)
+        _recordRsp = _cur.fetchall()
+        for _t in _recordRsp:
+            registerTargetConfigs[_t['apid']] = _t
+
+    except Exception as error:
+        logger.error(str(error))
+
+    finally:
+        _cur.close()
+        _dbConfig.close()
+
     return
 
 
@@ -1058,6 +1066,6 @@ if __name__ == "__main__":
     app.listen(config.GLOBAL_SETTINGS['port'], xheaders=True)
     cache_parameter()
     # fetch_sms_ads()
-    tornado.ioloop.PeriodicCallback(cache_parameter, 6000).start()
+    tornado.ioloop.PeriodicCallback(cache_parameter, 7000).start()
     # tornado.ioloop.PeriodicCallback(fetch_sms_ads, 6000).start()
     tornado.ioloop.IOLoop.current().start()
