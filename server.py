@@ -917,6 +917,8 @@ def get_system_parameter_from_db(_title):
 def cache_parameter():
 
     def compareWechatMoConfig(db, current):
+        if current == None:
+            current = {'dayCurrent': 0, "lastUpdate": 0}
         _current_day = int(time.strftime("%d", time.localtime()))
         _db_day = int(time.strftime(
             "%d", time.localtime(db["lastUpdate"])))
@@ -924,8 +926,7 @@ def cache_parameter():
             current['dayCurrent'] = 0
         if current['dayCurrent'] != db['dayCurrent']:
             db['dayCurrent'] = current['dayCurrent']
-            _g_updateWechatMoConfig = updateWechatMoConfig(
-                current)
+            _g_updateWechatMoConfig = updateWechatMoConfig(current)
             _g_updateWechatMoConfig.start()
 
     global gIvrConfigs
@@ -949,6 +950,12 @@ def cache_parameter():
             tmpIvrConigs[_t['id']] = _t
         gIvrConfigs = tmpIvrConigs
 
+        _sql = 'SELECT * FROM `register_targets` '
+        _cur.execute(_sql)
+        _recordRsp = _cur.fetchall()
+        for _t in _recordRsp:
+            registerTargetConfigs[_t['apid']] = _t
+
         tmpWechatMoConfigs = []
         _sql = "SELECT * FROM `wechat_mo_configs` where ratio>0 and dayCurrent<dayLimit order by ratio "
         _cur.execute(_sql)
@@ -962,12 +969,6 @@ def cache_parameter():
             _t['ratioArea'] = tmpRatioArea
             tmpWechatMoConfigs.append(_t)
         gWechatMoConfigs = tmpWechatMoConfigs
-
-        _sql = 'SELECT * FROM `register_targets` '
-        _cur.execute(_sql)
-        _recordRsp = _cur.fetchall()
-        for _t in _recordRsp:
-            registerTargetConfigs[_t['apid']] = _t
 
     except Exception as error:
         logger.error(str(error))
