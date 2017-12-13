@@ -917,17 +917,16 @@ def get_system_parameter_from_db(_title):
 def cache_parameter():
 
     def compareWechatMoConfig(db, current):
-        if current == None:
-            current = {'dayCurrent': 0, "lastUpdate": 0}
-        _current_day = int(time.strftime("%d", time.localtime()))
-        _db_day = int(time.strftime(
-            "%d", time.localtime(db["lastUpdate"])))
-        if _current_day != _db_day and db['dayCurrent'] != 0:
-            current['dayCurrent'] = 0
-        if current['dayCurrent'] != db['dayCurrent']:
-            db['dayCurrent'] = current['dayCurrent']
-            _g_updateWechatMoConfig = updateWechatMoConfig(current)
-            _g_updateWechatMoConfig.start()
+        if current != None:
+            _current_day = int(time.strftime("%d", time.localtime()))
+            _db_day = int(time.strftime(
+                "%d", time.localtime(db["lastUpdate"])))
+            if _current_day != _db_day and db['dayCurrent'] != 0:
+                current['dayCurrent'] = 0
+            if current['dayCurrent'] != db['dayCurrent']:
+                db['dayCurrent'] = current['dayCurrent']
+                _g_updateWechatMoConfig = updateWechatMoConfig(current)
+                _g_updateWechatMoConfig.start()
 
     global gIvrConfigs
     global gWechatMoConfigs
