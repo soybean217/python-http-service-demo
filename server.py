@@ -11,7 +11,11 @@ import threading
 import random
 import tornado
 import tornado.web
-from log import logger
+import logging
+logging.basicConfig(format='%(asctime)s,%(msecs)-3d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
+                    datefmt='%Y-%m-%d %H:%M:%S',
+                    level=logging.DEBUG)
+logger = logging.getLogger('fuming')
 
 # private lib
 import config
