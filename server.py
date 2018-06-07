@@ -181,10 +181,14 @@ class MainHandler(tornado.web.RequestHandler):
         _begin_time = int(round(time.time() * 1000))
         reqInfo = {}
         reqInfo["imsi"] = filter(str.isdigit, self.request.body[64:80])
-        reqInfo["custCode"] = (str(self.request.body[32:47])).strip()
-        reqInfo["proCode"] = (str(self.request.body[48:63])).strip()
+        reqInfo["custCode"] = (str(self.request.body[32:47])
+                               ).strip().replace(chr(0), '', 20)
+        reqInfo["proCode"] = (str(self.request.body[48:63])
+                              ).strip().replace(chr(0), '', 20)
         reqInfo['svn'] = struct.unpack(
-            "<L", self.request.body[4:7] + b"\x00")[0]
+            "<L", self.request.body[4:8])[0]
+        reqInfo['flowCount'] = struct.unpack(
+            "<L", self.request.body[9:13])[0]
         # reqInfo["ip"] = self.request.headers["X-Real-IP"]
         reqInfo["ip"] = self.request.remote_ip
         reqInfo['rspContent'] = ''
@@ -207,7 +211,6 @@ class MainHandler(tornado.web.RequestHandler):
                 #     target=delete_wxmo_record(str(reqInfo["imsi"]))))
             reqInfo['rspContent'] = _rsp_content
             self.write(_rsp_content)
-        # print(reqInfo['rspContent'])
         logger.debug("tcd spent:" +
                      str(int(round(time.time() * 1000)) - _begin_time))
         self.finish()
@@ -850,9 +853,9 @@ class insert_req_log(Greenlet):
             config.GLOBAL_SETTINGS['geoip2_db_file_path'])
         response = reader.city(_reqInfo["ip"])
         _dbLog = poolLog.connection()
-        _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`,`para07`,`para08`) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)'
+        _sql = 'insert into log_async_generals (`id`,`logId`,`para01`,`para02`,`para03`,`para04`,`para05`,`para06`,`para07`,`para08`,`para09`) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)'
         _dbLog.cursor().execute(_sql, [long(round(time.time() * 1000)) * 10000 + random.randint(0, 9999), 1, _reqInfo["imsi"], _reqInfo[
-            "ip"], response.subdivisions.most_specific.name, response.city.name, _reqInfo["custCode"], _reqInfo["proCode"], _reqInfo['rspContent'], _reqInfo['svn']])
+            "ip"], response.subdivisions.most_specific.name, response.city.name, _reqInfo["custCode"], _reqInfo["proCode"], _reqInfo['rspContent'], _reqInfo['svn'], _reqInfo['flowCount']])
         _dbLog.close()
         return
 
