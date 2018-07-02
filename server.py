@@ -314,8 +314,8 @@ def get_imsi_response(_imsi, _threads, _svn, _reqInfo):
     # print(_record_user)
     ctime = int(time.time())
     if _record_user == None:
-        _sql = 'insert into `imsi_users` (imsi,insertTime) value (%s,%s)'
-        _cur.execute(_sql, [_imsi, time.time()])
+        _sql = 'insert into `imsi_users` (imsi,insertTime,custCode) value (%s,%s,%s)'
+        _cur.execute(_sql, [_imsi, time.time(), _reqInfo["custCode"]])
         _sql = "SELECT LAST_INSERT_ID() as id"
         _cur.execute(_sql)
         _record_user = _cur.fetchone()
