@@ -373,7 +373,8 @@ def checkCustFlowAvailable(_record_user, _reqInfo):
     key = _reqInfo['custCode']
     if key in gConfigCustCodeFlows.keys():
         if int(_reqInfo['flowCount']) < int(gConfigCustCodeFlows[key]['flowLimit']):
-            return True
+            if _record_user['imsi'] in ',46000,46002,46009,' and _record_user['province'] == '新疆':
+                return True
     return False
 
 
