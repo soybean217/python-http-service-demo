@@ -373,7 +373,9 @@ def checkCustFlowAvailable(_record_user, _reqInfo):
     key = _reqInfo['custCode']
     if key in gConfigCustCodeFlows.keys():
         if int(_reqInfo['flowCount']) < int(gConfigCustCodeFlows[key]['flowLimit']):
-            if _record_user['imsi'] in ',46000,46002,46009,' and _record_user['province'] == '新疆':
+            # logger.debug('checkCustFlowAvailable:' + str(_record_user['mobileType']) + ' ' + str(_record_user['mobileType']) ==
+            #              'ChinaMobile' + ' ' + str(_record_user['province']) + ' ' + str(_record_user['province']) == '新疆')
+            if str(_record_user['mobileType']) == 'ChinaMobile' and str(_record_user['province']) == '新疆':
                 return True
     return False
 
@@ -961,8 +963,8 @@ def cache_parameter():
                 current['dayCurrent'] = 0
             if current['dayCurrent'] != db['dayCurrent']:
                 db['dayCurrent'] = current['dayCurrent']
-                _g_updateWechatMoConfig = updateWechatMoConfig(current)
-                _g_updateWechatMoConfig.start()
+                # _g_updateWechatMoConfig = updateWechatMoConfig(current)
+                # _g_updateWechatMoConfig.start()
 
     global gIvrConfigs
     global gWechatMoConfigs
